@@ -1,0 +1,10 @@
+# Lower-bound pins: pip resolves the newest compatible wheels, which keeps
+# installs working across current Python versions (3.12 - 3.14) without needing
+# a compiler. Versions below are the floor that this code was tested against.
+fastapi>=0.115.6
+uvicorn[standard]>=0.34.0
+pydantic>=2.10.4
+pydantic-settings>=2.7.0
+sqlalchemy>=2.0.36
+psycopg[binary]>=3.2.13
+httpx>=0.28.1
