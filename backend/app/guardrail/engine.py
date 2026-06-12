@@ -4,10 +4,10 @@ Decision policy (defence in depth):
 
 1. Run the fast heuristic layer first.
 2. If heuristics find a high-confidence injection signature, the prompt is
-   UNSAFE and we short-circuit -- no model call needed.
+   UNSAFE and we short-circuit, so no model call is needed.
 3. Otherwise escalate to the LLM judge for the ambiguous middle ground.
 4. If the judge is unavailable (no key / outage), fall back to "heuristics say
-   nothing, so treat as SAFE" -- but the response records that it was a
+   nothing, so treat as SAFE", but the response records that it was a
    degraded, heuristics-only decision so the caller knows.
 
 The response is fully explainable: it reports the final verdict, which layers
@@ -32,6 +32,7 @@ _BLOCK_ON_SIGHT = {
 
 
 async def classify(prompt: str) -> dict:
+    """Run a prompt through both layers and return the combined, explainable verdict."""
     started = time.perf_counter()
 
     hits = heuristics.scan(prompt)

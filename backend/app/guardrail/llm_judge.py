@@ -38,6 +38,7 @@ class JudgeResult:
 
 
 def _skipped(reason: str) -> JudgeResult:
+    """Build a 'this layer did not run' result carrying the given explanation."""
     return JudgeResult(verdict="SKIPPED", confidence=0.0, reason=reason, available=False)
 
 

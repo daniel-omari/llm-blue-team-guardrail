@@ -127,6 +127,34 @@ ruff check .       # lint
 
 The frontend is type-checked and built in CI (`npm run lint && npm run build`).
 
+## Benchmark
+
+`benchmark/run_benchmark.py` scores the guardrail against labelled SAFE/UNSAFE
+prompts, treating an attack (UNSAFE) as the positive class and reporting a
+confusion matrix per split and overall. The dataset combines the labelled cases
+from the SCC353 Secure AI coursework with a held-out split of fresh prompts that
+were not used to write the heuristic rules, so the held-out figures estimate
+generalisation.
+
+```bash
+cd backend
+python -m benchmark.run_benchmark
+```
+
+Heuristics-only baseline (no LLM judge), 34 cases:
+
+| split      | precision | recall | F1   | false-positive rate |
+| ---------- | --------- | ------ | ---- | ------------------- |
+| coursework | 100%      | 40%    | 0.57 | 0%                  |
+| held-out   | 100%      | 75%    | 0.86 | 0%                  |
+| overall    | 100%      | 56%    | 0.71 | 0%                  |
+
+The fast heuristic layer is deliberately high-precision: it raises zero false
+alarms on benign prompts, but on its own catches only the blatant attacks. The
+subtle, multilingual and encoded injections it misses are exactly the cases the
+design escalates to the LLM judge. Set `LLM_API_KEY` to benchmark the full
+pipeline, which is expected to recover most of that recall.
+
 ## Tech stack
 
 Backend: Python, FastAPI, Pydantic, SQLAlchemy, PostgreSQL, httpx.
@@ -137,8 +165,9 @@ Infrastructure: Docker, docker-compose, GitHub Actions.
 
 - Persisted analytics dashboard over the `/history` data.
 - Configurable policy thresholds per attack category.
-- A labelled benchmark harness reporting precision/recall against the coursework
-  test set and public jailbreak datasets.
+- Tune the heuristic layer to lift recall on the multilingual and role-play
+  attacks surfaced by the benchmark.
+- Expand the benchmark with public jailbreak datasets and a full-pipeline run.
 - Rate limiting and an API-key auth layer for multi-tenant use.
 
 ## License

@@ -32,6 +32,7 @@ def init_db() -> None:
 
 
 def enabled() -> bool:
+    """True when a database is configured, so logging and history are available."""
     return _SessionLocal is not None
 
 

@@ -104,7 +104,7 @@ _COMPILED: list[tuple[str, re.Pattern[str], str]] = [
 
 # Scripts whose presence mid-prompt (when the prompt is mostly Latin) often
 # signals a multilingual injection trying to smuggle instructions past an
-# English-only filter -- the exact blind spot called out in the coursework.
+# English-only filter, the exact blind spot called out in the coursework.
 _NON_LATIN = re.compile(
     r"[Ѐ-ӿ]"          # Cyrillic
     r"|[؀-ۿ]"         # Arabic

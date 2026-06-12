@@ -24,6 +24,7 @@ class Settings(BaseSettings):
 
     @property
     def cors_origin_list(self) -> list[str]:
+        """Split the comma-separated CORS origins env var into a clean list."""
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
 
 

@@ -21,11 +21,13 @@ const SAMPLES: { label: string; prompt: string }[] = [
   },
 ];
 
+// Coloured SAFE / UNSAFE / SKIPPED status pill.
 function Badge({ verdict }: { verdict: string }) {
   const cls = verdict === "UNSAFE" ? "badge unsafe" : verdict === "SAFE" ? "badge safe" : "badge skip";
   return <span className={cls}>{verdict}</span>;
 }
 
+// Renders the final verdict plus the per-layer breakdown and findings.
 function Result({ data }: { data: ClassifyResponse }) {
   return (
     <div className="result">
@@ -55,7 +57,7 @@ function Result({ data }: { data: ClassifyResponse }) {
               <ul className="findings">
                 {layer.findings.map((f, i) => (
                   <li key={i}>
-                    <code>{f.category}</code> — {f.reason}
+                    <code>{f.category}</code>: {f.reason}
                   </li>
                 ))}
               </ul>
@@ -67,12 +69,14 @@ function Result({ data }: { data: ClassifyResponse }) {
   );
 }
 
+// Top-level page: prompt box, sample attacks, and the result card.
 export default function App() {
   const [prompt, setPrompt] = useState("");
   const [data, setData] = useState<ClassifyResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Send the current prompt to the API and store the returned verdict.
   async function onScreen() {
     if (!prompt.trim()) return;
     setLoading(true);
@@ -92,8 +96,9 @@ export default function App() {
       <header>
         <h1>Prompt Guardrail</h1>
         <p className="tagline">
-          A layered guardrail that screens prompts for injection and jailbreak attempts —
-          a fast heuristic pass, then a hosted-LLM judge for the ambiguous ones.
+          A layered guardrail that screens prompts for injection and jailbreak
+          attempts, using a fast heuristic pass and then a hosted-LLM judge for
+          the ambiguous ones.
         </p>
       </header>
 
@@ -108,12 +113,12 @@ export default function App() {
       <textarea
         value={prompt}
         onChange={(e) => setPrompt(e.target.value)}
-        placeholder="Paste a user prompt to screen…"
+        placeholder="Paste a user prompt to screen..."
         rows={5}
       />
 
       <button className="screen" onClick={onScreen} disabled={loading || !prompt.trim()}>
-        {loading ? "Screening…" : "Screen prompt"}
+        {loading ? "Screening..." : "Screen prompt"}
       </button>
 
       {error && <div className="error">{error}</div>}

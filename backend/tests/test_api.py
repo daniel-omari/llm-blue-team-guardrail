@@ -1,7 +1,7 @@
 """End-to-end API tests using FastAPI's TestClient.
 
 No database or LLM key is configured in the test environment, so the service
-runs in heuristics-only mode -- which makes every assertion here deterministic.
+runs in heuristics-only mode, which makes every assertion here deterministic.
 """
 
 from fastapi.testclient import TestClient

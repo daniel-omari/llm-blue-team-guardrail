@@ -17,6 +17,7 @@ from app.schemas import ClassifyRequest, ClassifyResponse, HistoryItem
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    """Initialise the database (if one is configured) when the app starts up."""
     db.init_db()
     yield
 
@@ -38,11 +39,13 @@ app.add_middleware(
 
 @app.get("/health")
 async def health() -> dict:
+    """Liveness check that also reports which optional features are switched on."""
     return {"status": "ok", "db": db.enabled(), "llm_judge": bool(settings.llm_api_key)}
 
 
 @app.post("/classify", response_model=ClassifyResponse)
 async def classify(req: ClassifyRequest) -> ClassifyResponse:
+    """Screen a single prompt and best-effort log the verdict to the database."""
     result = await engine.classify(req.prompt)
 
     with db.session_scope() as s:
@@ -60,6 +63,7 @@ async def classify(req: ClassifyRequest) -> ClassifyResponse:
 
 @app.get("/history", response_model=list[HistoryItem])
 async def history(limit: int = 50) -> list[HistoryItem]:
+    """Return the most recent classifications (requires a configured database)."""
     if not db.enabled():
         raise HTTPException(status_code=503, detail="History requires a configured database.")
     limit = max(1, min(limit, 200))

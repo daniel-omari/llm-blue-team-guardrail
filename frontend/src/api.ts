@@ -22,6 +22,7 @@ export interface ClassifyResponse {
 // VITE_API_BASE to the deployed backend URL at build time.
 const API_BASE = import.meta.env.VITE_API_BASE ?? "/api";
 
+// Send a prompt to the guardrail API and return its verdict (throws on error).
 export async function classifyPrompt(prompt: string): Promise<ClassifyResponse> {
   const res = await fetch(`${API_BASE}/classify`, {
     method: "POST",
