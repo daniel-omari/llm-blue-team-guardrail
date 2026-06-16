@@ -21,6 +21,15 @@ const SAMPLES: { label: string; prompt: string }[] = [
   },
 ];
 
+// Map internal layer / decision identifiers to friendly display labels, so a
+// benign result reads "heuristic layer" rather than "heuristics_degraded".
+const LABELS: Record<string, string> = {
+  heuristics: "heuristic layer",
+  heuristics_degraded: "heuristic layer",
+  llm_judge: "LLM judge",
+};
+const prettyLabel = (id: string): string => LABELS[id] ?? id;
+
 // Coloured SAFE / UNSAFE / SKIPPED status pill.
 function Badge({ verdict }: { verdict: string }) {
   const cls = verdict === "UNSAFE" ? "badge unsafe" : verdict === "SAFE" ? "badge safe" : "badge skip";
@@ -35,7 +44,7 @@ function Result({ data }: { data: ClassifyResponse }) {
         <Badge verdict={data.verdict} />
         <div className="meta">
           <span>
-            decided by <strong>{data.decided_by}</strong>
+            decided by <strong>{prettyLabel(data.decided_by)}</strong>
           </span>
           <span>confidence {(data.confidence * 100).toFixed(0)}%</span>
           <span>{data.latency_ms.toFixed(1)} ms</span>
@@ -47,7 +56,7 @@ function Result({ data }: { data: ClassifyResponse }) {
         {data.layers.map((layer) => (
           <div key={layer.name} className={`layer ${layer.ran ? "" : "layer-off"}`}>
             <div className="layer-head">
-              <span className="layer-name">{layer.name}</span>
+              <span className="layer-name">{prettyLabel(layer.name)}</span>
               <span className="layer-verdict">
                 {layer.ran ? layer.verdict : "skipped"}
               </span>
