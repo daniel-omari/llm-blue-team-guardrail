@@ -1,3 +1,14 @@
+---
+title: LLM Blue-Team Guardrail
+emoji: 🛡️
+colorFrom: blue
+colorTo: indigo
+sdk: docker
+app_port: 7860
+pinned: false
+short_description: A layered guardrail that screens prompts for injection and jailbreak attempts.
+---
+
 # Prompt Guardrail
 
 > **An LLM blue-team project: the defensive counterpart to my red-team [Secure AI coursework](https://github.com/daniel-omari/ml-security-redteaming-guardrails).**

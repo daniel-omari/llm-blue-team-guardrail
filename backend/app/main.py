@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select
 
 from app import db
@@ -83,3 +85,11 @@ async def history(limit: int = 50) -> list[HistoryItem]:
             )
             for r in rows
         ]
+
+
+# Serve the built React frontend when it is present, so a single container can
+# host both the UI and the API. The explicit API routes above are matched first;
+# any other path falls through to the static files (index.html for "/").
+_static_dir = os.path.join(os.path.dirname(__file__), "static")
+if os.path.isdir(_static_dir):
+    app.mount("/", StaticFiles(directory=_static_dir, html=True), name="frontend")
