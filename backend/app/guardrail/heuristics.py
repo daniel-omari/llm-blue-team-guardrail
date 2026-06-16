@@ -10,6 +10,13 @@ The patterns here are grouped by attack family. They were seeded from the
 labelled cases in the original SCC353 Secure AI coursework (instruction-override,
 role-play, social-engineering and multilingual injections) and extended with the
 common public jailbreak phrasings.
+
+Heuristics are deliberately a coarse first pass: they trade precision for speed
+and are inherently evadable, which is exactly why the design escalates the
+ambiguous middle ground to the LLM judge. Two cheap measures here reduce the
+most obvious failure modes: rules look for an *action/context* around sensitive
+nouns (so a bare mention of "token" is not flagged), and matching also runs over
+a de-obfuscated copy of the prompt so trivial leetspeak ("p4ssw0rd") still hits.
 """
 
 from __future__ import annotations
@@ -57,10 +64,22 @@ _RULES: list[tuple[str, str, str]] = [
         r"\b(what|repeat)\b[^.\n]{0,30}\b(was|were|are)\b[^.\n]{0,20}\b(you|your)\b[^.\n]{0,15}\b(told|instructed|programmed|configured)\b",  # noqa: E501
         "Probes for the model's underlying configuration or instructions.",
     ),
+    # Secrets are only flagged when something *asks to disclose* them, so a bare
+    # mention of a word like "token" or "password" is no longer a false positive.
     (
         "secret_extraction",
-        r"\b(api[_\s-]?key|password|secret|token|credential|private key|\.env)\b",
-        "References secrets or credentials that should never be disclosed.",
+        r"\b(show|reveal|print|display|tell|give|send|leak|expose|share|disclose|dump|output|repeat|provide|list)\b[^.\n]{0,30}\b(api[_\s-]?key|password|passphrase|secret key|secret|credentials?|private key|access key|(?:api|auth|access|bearer|session)[_\s-]?token)s?\b",  # noqa: E501
+        "Asks the model to disclose secrets or credentials.",
+    ),
+    (
+        "secret_extraction",
+        r"\b(your|the system|the admin|system|admin|root)\b[^.\n]{0,12}\b(api[_\s-]?key|password|passphrase|secret|token|credentials?|access key)s?\b",  # noqa: E501
+        "Tries to elicit the system's own secrets or credentials.",
+    ),
+    (
+        "secret_extraction",
+        r"\b(show|reveal|print|leak|dump|read|cat|send|expose|exfiltrate|output|paste)\b[^.\n]{0,30}(\.env\b|\benv file|credentials?\.(json|ya?ml)|id_rsa|\.pem\b|private[_\s-]?key)",  # noqa: E501
+        "Attempts to read or exfiltrate a secrets / credentials file.",
     ),
     # --- Role-play / persona override -------------------------------------
     (
@@ -102,6 +121,19 @@ _COMPILED: list[tuple[str, re.Pattern[str], str]] = [
     for category, pattern, reason in _RULES
 ]
 
+# Light de-obfuscation: collapse the most common leetspeak substitutions so a
+# disguised attack ("1gnore", "p4ssw0rd") still matches the rules above. We match
+# against both the original and this normalised copy, so normalisation can only
+# catch more attacks, never change how a clean prompt reads.
+_LEET = str.maketrans(
+    {"0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t", "@": "a", "$": "s"}
+)
+
+
+def _deleet(text: str) -> str:
+    return text.translate(_LEET)
+
+
 # Scripts whose presence mid-prompt (when the prompt is mostly Latin) often
 # signals a multilingual injection trying to smuggle instructions past an
 # English-only filter, the exact blind spot called out in the coursework.
@@ -124,9 +156,12 @@ _FOREIGN_INJECTION = re.compile(
 def scan(prompt: str) -> list[HeuristicHit]:
     """Return every heuristic rule that matched ``prompt`` (possibly empty)."""
 
+    normalised = _deleet(prompt)
     hits: list[HeuristicHit] = []
     for category, regex, reason in _COMPILED:
-        match = regex.search(prompt)
+        # Match the prompt as written first; fall back to the de-obfuscated copy
+        # so trivial leetspeak evasion still trips the rule.
+        match = regex.search(prompt) or regex.search(normalised)
         if match:
             hits.append(
                 HeuristicHit(
