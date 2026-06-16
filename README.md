@@ -4,9 +4,10 @@ emoji: 🛡️
 colorFrom: blue
 colorTo: indigo
 sdk: docker
+license: mit
 app_port: 7860
 pinned: false
-short_description: A layered guardrail that screens prompts for injection and jailbreak attempts.
+short_description: Layered guardrail for prompt injection and jailbreaks
 ---
 
 # Prompt Guardrail
