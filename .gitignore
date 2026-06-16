@@ -18,3 +18,7 @@ dist/
 .DS_Store
 .vscode/
 .idea/
+
+# Local SQLite database
+*.db
+guardrail.db

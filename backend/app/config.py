@@ -8,9 +8,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    # Postgres connection string. When unset, request logging is disabled and
-    # the service still classifies prompts (handy for tests and demos).
-    database_url: str | None = None
+    # Database for request logging / history. Defaults to a local SQLite file so
+    # /history works with zero setup; set DATABASE_URL to a Postgres URL
+    # (postgresql+psycopg://...) for Docker/production.
+    database_url: str = "sqlite:///./guardrail.db"
 
     # Hosted-LLM judge. The defaults target the Anthropic Messages API, but any
     # compatible endpoint works by overriding base_url / model.

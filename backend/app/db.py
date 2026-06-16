@@ -1,8 +1,8 @@
 """Database wiring.
 
-Logging classifications is a *best-effort* feature: if ``DATABASE_URL`` is not
-set (tests, quick demos) the helpers below become no-ops and the API keeps
-working. This keeps the core guardrail decoupled from infrastructure.
+Classifications are logged for the ``/history`` endpoint. The URL defaults to a
+local SQLite file (see config), so history works with no external services;
+setting ``DATABASE_URL`` to a Postgres URL switches to Postgres for production.
 """
 
 from __future__ import annotations
@@ -12,6 +12,7 @@ from contextlib import contextmanager
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import StaticPool
 
 from app.config import settings
 from app.models import Base
@@ -21,12 +22,25 @@ _SessionLocal: sessionmaker[Session] | None = None
 
 
 def init_db() -> None:
-    """Create the engine and tables if a database is configured."""
+    """Create the engine and tables. Handles SQLite (incl. in-memory for tests)
+    and Postgres transparently based on the configured URL."""
 
     global _engine, _SessionLocal
-    if not settings.database_url:
+    url = settings.database_url
+    if not url:
         return
-    _engine = create_engine(settings.database_url, pool_pre_ping=True, future=True)
+    if url.startswith("sqlite"):
+        # SQLite needs cross-thread access for the threaded server; in-memory
+        # SQLite additionally needs a single shared connection (StaticPool).
+        connect_args = {"check_same_thread": False}
+        if ":memory:" in url or url == "sqlite://":
+            _engine = create_engine(
+                url, connect_args=connect_args, poolclass=StaticPool, future=True
+            )
+        else:
+            _engine = create_engine(url, connect_args=connect_args, future=True)
+    else:
+        _engine = create_engine(url, pool_pre_ping=True, future=True)
     _SessionLocal = sessionmaker(bind=_engine, autoflush=False, expire_on_commit=False)
     Base.metadata.create_all(_engine)
 

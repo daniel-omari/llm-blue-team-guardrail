@@ -1,7 +1,8 @@
 """End-to-end API tests using FastAPI's TestClient.
 
-No database or LLM key is configured in the test environment, so the service
-runs in heuristics-only mode, which makes every assertion here deterministic.
+conftest points DATABASE_URL at an in-memory SQLite database and no LLM key is
+set, so the judge stays in heuristics-only mode and every assertion here is
+deterministic.
 """
 
 from fastapi.testclient import TestClient
@@ -16,7 +17,7 @@ def test_health_ok():
     assert r.status_code == 200
     body = r.json()
     assert body["status"] == "ok"
-    assert body["db"] is False          # no DATABASE_URL in tests
+    assert body["db"] is True           # in-memory SQLite configured in conftest
     assert body["llm_judge"] is False   # no LLM key in tests
 
 
@@ -28,7 +29,6 @@ def test_classify_blocks_obvious_injection():
     body = r.json()
     assert body["verdict"] == "UNSAFE"
     assert body["decided_by"] == "heuristics"
-    # The LLM layer should have been skipped (heuristics short-circuited).
     judge = next(ly for ly in body["layers"] if ly["name"] == "llm_judge")
     assert judge["ran"] is False
 
@@ -40,7 +40,6 @@ def test_classify_allows_benign_prompt():
     assert r.status_code == 200
     body = r.json()
     assert body["verdict"] == "SAFE"
-    # Judge has no key, so we fall back to a flagged degraded decision.
     assert body["decided_by"] == "heuristics_degraded"
     assert body["latency_ms"] >= 0
 
@@ -50,6 +49,10 @@ def test_classify_rejects_empty_prompt():
     assert r.status_code == 422
 
 
-def test_history_requires_db():
+def test_history_logs_and_returns():
+    client.post("/classify", json={"prompt": "What time does the museum open?"})
     r = client.get("/history")
-    assert r.status_code == 503
+    assert r.status_code == 200
+    body = r.json()
+    assert isinstance(body, list)
+    assert any(item["verdict"] in ("SAFE", "UNSAFE") for item in body)
