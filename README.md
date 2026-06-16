@@ -22,7 +22,10 @@ backend, PostgreSQL, Docker, CI).
 
 [![CI](https://github.com/daniel-omari/llm-blue-team-guardrail/actions/workflows/ci.yml/badge.svg)](https://github.com/daniel-omari/llm-blue-team-guardrail/actions/workflows/ci.yml)
 
-> Live demo: _add your deploy URL here_
+> **Live demo:** https://daniel-omari-llm-blue-team-guardrail.hf.space  
+> (free tier, so the first load after it has been idle takes a few seconds to wake)
+
+![Prompt Guardrail screening prompts for injection and jailbreak attempts](docs/demo.gif)
 
 ## Background
 
