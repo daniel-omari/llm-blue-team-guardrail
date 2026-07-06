@@ -50,7 +50,11 @@ Incoming prompts pass through two layers, cheapest first (defence in depth):
    social engineering, output-format hijacking, and mid-prompt multilingual
    injection. This runs in well under a millisecond and catches the obvious
    attacks without spending an API call. If it finds a high-confidence
-   signature, the prompt is blocked and the request short-circuits.
+   signature, the prompt is blocked and the request short-circuits. The rules
+   are precision-tuned: sensitive nouns only match with a disclosure verb
+   around them, every rule also runs over a de-leetspeaked copy of the prompt,
+   and script-mixing on its own is a low-confidence signal for the judge
+   rather than an instant block.
 
 2. **Hosted-LLM judge.** Only the ambiguous prompts that survive the heuristic
    layer are escalated to a small hosted model, which returns a structured
