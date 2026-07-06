@@ -74,7 +74,12 @@ async def classify(prompt: str) -> dict:
             # the model, so we allow the prompt but flag the degradation.
             verdict = "SAFE"
             confidence = 0.5
-            reason = "No injection signatures detected (heuristics-only, judge unavailable)."
+            reason = (
+                "No injection signatures detected (heuristics-only, judge unavailable)."
+                if not hits
+                else "Only low-confidence signals found; allowed "
+                "(heuristics-only, judge unavailable)."
+            )
             decided_by = "heuristics_degraded"
 
     latency_ms = round((time.perf_counter() - started) * 1000, 2)

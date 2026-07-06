@@ -89,7 +89,7 @@ _RULES: list[tuple[str, str, str]] = [
     ),
     (
         "roleplay_override",
-        r"\bdeveloper mode\b|\bdo anything now\b|\bDAN\b",
+        r"\bdeveloper mode\b|\bdo anything now\b|(?-i:\bDAN\b)",
         "Invokes a known jailbreak persona ('DAN' / developer mode).",
     ),
     (
@@ -145,8 +145,9 @@ _NON_LATIN = re.compile(
     r"|[가-힯]"         # Hangul
 )
 
-# Injection verbs in a few languages, used only to corroborate a mixed-script
-# prompt (keeps the multilingual rule from firing on innocent foreign text).
+# Injection verbs in a few languages. This is the *blocking* multilingual
+# signal: a foreign instruction verb is what separates an actual smuggled
+# instruction from innocent foreign text (e.g. a translation question).
 _FOREIGN_INJECTION = re.compile(
     r"\b(olvida|ignora|wykonaj|zignoruj|vergiss|ignorier|oublie|игнорир|忘记|無視)\w*\b",
     re.IGNORECASE,
@@ -171,21 +172,32 @@ def scan(prompt: str) -> list[HeuristicHit]:
                 )
             )
 
-    # Multilingual injection: a predominantly Latin prompt that suddenly
-    # switches script AND contains a foreign instruction verb.
+    # Multilingual injection: only a foreign *instruction verb* blocks. A prompt
+    # that merely mixes scripts (e.g. an innocent translation question) is
+    # recorded as a low-confidence signal instead, so it escalates to the LLM
+    # judge rather than being blocked outright.
     latin = sum(1 for ch in prompt if ch.isascii() and ch.isalpha())
-    non_latin = len(_NON_LATIN.findall(prompt))
-    mixed_script = latin > 20 and non_latin > 0
-    if (mixed_script and _NON_LATIN.search(prompt)) or _FOREIGN_INJECTION.search(prompt):
-        if _FOREIGN_INJECTION.search(prompt) or mixed_script:
-            hits.append(
-                HeuristicHit(
-                    category="multilingual_injection",
-                    pattern="mixed-script / foreign instruction",
-                    reason=(
-                        "Switches language mid-prompt, a technique used to slip "
-                        "instructions past an English-only filter."
-                    ),
-                )
+    mixed_script = latin > 20 and _NON_LATIN.search(prompt) is not None
+    if _FOREIGN_INJECTION.search(prompt):
+        hits.append(
+            HeuristicHit(
+                category="multilingual_injection",
+                pattern="foreign instruction verb",
+                reason=(
+                    "Switches language mid-prompt to issue instructions, a "
+                    "technique used to slip past an English-only filter."
+                ),
             )
+        )
+    elif mixed_script:
+        hits.append(
+            HeuristicHit(
+                category="mixed_script",
+                pattern="mixed-script text",
+                reason=(
+                    "Mixes writing scripts mid-prompt; not blocked on its own, "
+                    "but flagged for the judge layer to weigh."
+                ),
+            )
+        )
     return hits
