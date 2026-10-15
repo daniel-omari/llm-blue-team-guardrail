@@ -15,3 +15,28 @@ os.environ["LLM_API_KEY"] = ""
 from app import db  # noqa: E402  (import after the env var is set)
 
 db.init_db()
+
+
+import pytest  # noqa: E402
+
+from app import llm  # noqa: E402
+from app.guardrail import llm_judge  # noqa: E402
+
+
+@pytest.fixture
+def fake_llm(monkeypatch):
+    """A fake model: as the judge it flags text that addresses "AI assistant"; as the
+    answerer it echoes the prompt it was given, so tests can see the context."""
+    calls = []
+
+    async def complete(system, user, max_tokens=400):
+        calls.append((system, user))
+        if system in llm_judge._SYSTEM.values():
+            unsafe = "ai assistant" in user.lower()
+            verdict = "UNSAFE" if unsafe else "SAFE"
+            return f'{{"verdict": "{verdict}", "confidence": 0.9, "reason": "fake judge"}}'
+        return f"ANSWER FROM: {user}"
+
+    monkeypatch.setattr(llm, "enabled", lambda: True)
+    monkeypatch.setattr(llm, "complete", complete)
+    return calls
