@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+_ENV_FILE = Path(__file__).resolve().parent.parent / ".env"
+
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    # backend/.env, found from this file rather than the working directory, so it also
+    # loads when an agent (e.g. Claude Desktop) starts the MCP server from elsewhere.
+    model_config = SettingsConfigDict(env_file=_ENV_FILE, extra="ignore")
 
     # Database for request logging / history. Defaults to a local SQLite file so
     # /history works with zero setup; set DATABASE_URL to a Postgres URL
@@ -36,6 +41,10 @@ class Settings(BaseSettings):
     rag_model_cache_dir: str | None = None   # None = fastembed's default cache folder
     rag_top_k: int = 4
 
+    # Host headers the MCP endpoint (/mcp) accepts, comma-separated; ":*" means any
+    # port. Add the public host name when deploying (DNS-rebinding protection).
+    mcp_allowed_hosts: str = "localhost:*,127.0.0.1:*"
+
     # CORS origins allowed to call the API (comma-separated in the env var).
     cors_origins: str = "http://localhost:5173"
 
@@ -47,6 +56,10 @@ class Settings(BaseSettings):
         if self.llm_provider == "openai":
             return "https://api.openai.com/v1"
         return "https://api.anthropic.com"
+
+    @property
+    def mcp_allowed_host_list(self) -> list[str]:
+        return [h.strip() for h in self.mcp_allowed_hosts.split(",") if h.strip()]
 
     @property
     def cors_origin_list(self) -> list[str]:

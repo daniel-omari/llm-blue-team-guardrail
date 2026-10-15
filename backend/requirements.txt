@@ -11,3 +11,5 @@ httpx>=0.28.1
 # RAG demo: local embedding model (ONNX, no GPU or API key) and vector maths
 fastembed>=0.7.3
 numpy>=1.26
+# MCP server: the guardrail as tools for AI agents (stdio and Streamable HTTP)
+mcp>=2.3.0

@@ -11,6 +11,8 @@ os.environ["DATABASE_URL"] = "sqlite://"
 # Never call a real model from the tests, even if a developer's .env holds a key.
 # (Real environment variables take priority over .env.)
 os.environ["LLM_API_KEY"] = ""
+# TestClient sends "Host: testserver"; allow it on the MCP endpoint.
+os.environ["MCP_ALLOWED_HOSTS"] = "localhost:*,127.0.0.1:*,testserver"
 
 from app import db  # noqa: E402  (import after the env var is set)
 

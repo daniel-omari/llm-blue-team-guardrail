@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select
 
-from app import db
+from app import db, mcp_server
 from app.config import settings
 from app.guardrail import engine
 from app.models import Classification
@@ -24,12 +24,16 @@ from app.schemas import (
     RagAskResponse,
 )
 
+# The MCP server's HTTP transport (see app/mcp_server.py), served at /mcp
+_mcp_http = mcp_server.http_app()
+
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    """Initialise the database (if one is configured) when the app starts up."""
+    """Initialise the database (if one is configured) and run the MCP session manager."""
     db.init_db()
-    yield
+    async with mcp_server.server.session_manager.run():
+        yield
 
 
 app = FastAPI(
@@ -105,6 +109,10 @@ async def rag_ask(req: RagAskRequest) -> RagAskResponse:
             status_code=503, detail=f"Knowledge base unavailable ({exc})."
         ) from exc
     return RagAskResponse(**await kb.ask(req.question, req.top_k))
+
+
+# MCP for AI agents: the guardrail's tools over Streamable HTTP at /mcp
+app.router.routes.extend(_mcp_http.routes)
 
 
 # Serve the built React frontend when it is present, so a single container can
