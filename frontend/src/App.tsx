@@ -1,5 +1,7 @@
 import { useRef, useState } from "react";
 import { classifyPrompt, type ClassifyResponse } from "./api";
+import KnowledgeBase from "./KnowledgeBase";
+import { Badge, prettyLabel } from "./ui";
 
 // Each category holds several prompts; clicking a chip cycles to a fresh one so
 // the demo doesn't feel canned. The first entry is the "headline" example.
@@ -41,21 +43,6 @@ const SAMPLES: { label: string; prompts: string[] }[] = [
     ],
   },
 ];
-
-// Map internal layer / decision identifiers to friendly display labels, so a
-// benign result reads "heuristic layer" rather than "heuristics_degraded".
-const LABELS: Record<string, string> = {
-  heuristics: "heuristic layer",
-  heuristics_degraded: "heuristic layer",
-  llm_judge: "LLM judge",
-};
-const prettyLabel = (id: string): string => LABELS[id] ?? id;
-
-// Coloured SAFE / UNSAFE / SKIPPED status pill.
-function Badge({ verdict }: { verdict: string }) {
-  const cls = verdict === "UNSAFE" ? "badge unsafe" : verdict === "SAFE" ? "badge safe" : "badge skip";
-  return <span className={cls}>{verdict}</span>;
-}
 
 // Renders the final verdict plus the per-layer breakdown and findings.
 function Result({ data }: { data: ClassifyResponse }) {
@@ -107,8 +94,8 @@ function Result({ data }: { data: ClassifyResponse }) {
   );
 }
 
-// Top-level page: prompt box, sample attacks, and the result card.
-export default function App() {
+// The "Screen a prompt" tab: prompt box, sample attacks, and the result card.
+function PromptScreen() {
   const [prompt, setPrompt] = useState("");
   const [data, setData] = useState<ClassifyResponse | null>(null);
   const [loading, setLoading] = useState(false);
@@ -143,16 +130,7 @@ export default function App() {
   }
 
   return (
-    <div className="app">
-      <header>
-        <h1>Prompt Guardrail</h1>
-        <p className="tagline">
-          A layered guardrail that screens prompts for injection and jailbreak
-          attempts, using a fast heuristic pass and then a hosted-LLM judge for
-          the ambiguous ones.
-        </p>
-      </header>
-
+    <section>
       <div className="samples">
         {SAMPLES.map((s) => (
           <button key={s.label} className="chip" onClick={() => pickSample(s.label, s.prompts)}>
@@ -174,6 +152,41 @@ export default function App() {
 
       {error && <div className="error">{error}</div>}
       {data && <Result data={data} />}
+    </section>
+  );
+}
+
+type Tab = "prompt" | "rag";
+
+// Top-level page: header, tab switcher, and the active tab.
+export default function App() {
+  const [tab, setTab] = useState<Tab>("prompt");
+  return (
+    <div className="app">
+      <header>
+        <h1>Prompt Guardrail</h1>
+        <p className="tagline">
+          A layered guardrail that screens prompts for injection and jailbreak
+          attempts, using a fast heuristic pass and then a hosted-LLM judge for
+          the ambiguous ones. It also guards a RAG pipeline, and is available to AI
+          agents as an MCP server.
+        </p>
+      </header>
+
+      <nav className="tabs" role="tablist">
+        <button role="tab" aria-selected={tab === "prompt"} className={tab === "prompt" ? "tab active" : "tab"}
+                onClick={() => setTab("prompt")}>
+          Screen a prompt
+        </button>
+        <button role="tab" aria-selected={tab === "rag"} className={tab === "rag" ? "tab active" : "tab"}
+                onClick={() => setTab("rag")}>
+          Knowledge base
+        </button>
+      </nav>
+
+      {/* Both stay mounted, so switching tabs keeps each one's input and result */}
+      <div hidden={tab !== "prompt"}><PromptScreen /></div>
+      <div hidden={tab !== "rag"}><KnowledgeBase /></div>
 
       <footer>
         Productized from the guardrail in my SCC353 Secure AI coursework. Source on GitHub.
