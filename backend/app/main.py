@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 from contextlib import asynccontextmanager
 
@@ -14,7 +15,14 @@ from app import db
 from app.config import settings
 from app.guardrail import engine
 from app.models import Classification
-from app.schemas import ClassifyRequest, ClassifyResponse, HistoryItem
+from app.rag import pipeline as rag
+from app.schemas import (
+    ClassifyRequest,
+    ClassifyResponse,
+    HistoryItem,
+    RagAskRequest,
+    RagAskResponse,
+)
 
 
 @asynccontextmanager
@@ -85,6 +93,18 @@ async def history(limit: int = 50) -> list[HistoryItem]:
             )
             for r in rows
         ]
+
+
+@app.post("/rag/ask", response_model=RagAskResponse)
+async def rag_ask(req: RagAskRequest) -> RagAskResponse:
+    """Answer a question from the knowledge base, screening every retrieved chunk."""
+    try:
+        kb = await asyncio.to_thread(rag.get_knowledge_base)
+    except rag.KnowledgeBaseUnavailable as exc:
+        raise HTTPException(
+            status_code=503, detail=f"Knowledge base unavailable ({exc})."
+        ) from exc
+    return RagAskResponse(**await kb.ask(req.question, req.top_k))
 
 
 # Serve the built React frontend when it is present, so a single container can

@@ -30,6 +30,12 @@ class Settings(BaseSettings):
     # answer quickly instead of thinking at length about a one-line verdict.
     llm_reasoning_effort: str | None = None
 
+    # RAG demo: the local embedding model (downloaded once, then cached) and how
+    # many chunks to retrieve per question.
+    rag_embedding_model: str = "BAAI/bge-small-en-v1.5"
+    rag_model_cache_dir: str | None = None   # None = fastembed's default cache folder
+    rag_top_k: int = 4
+
     # CORS origins allowed to call the API (comma-separated in the env var).
     cors_origins: str = "http://localhost:5173"
 

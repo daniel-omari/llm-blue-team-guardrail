@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ClassifyRequest(BaseModel):
@@ -36,3 +36,41 @@ class HistoryItem(BaseModel):
     confidence: float
     latency_ms: float
     created_at: str
+
+
+class RagAskRequest(BaseModel):
+    # The example shown in the interactive docs (/docs) leaves top_k out, so it uses
+    # the server default instead of a single chunk.
+    model_config = ConfigDict(json_schema_extra={
+        "examples": [{"question": "What is the meal allowance per day when travelling?"}]
+    })
+
+    question: str = Field(..., min_length=1, max_length=2000,
+                          description="A question about the knowledge base.")
+    top_k: int | None = Field(None, ge=1, le=8,
+                              description="How many chunks to retrieve (default 4).")
+
+
+class RagChunk(BaseModel):
+    id: str
+    title: str
+    section: str
+    source: str
+    text: str
+    score: float = Field(..., description="Cosine similarity to the question.")
+    verdict: str = Field(..., description='The guardrail on this chunk: "SAFE" or "UNSAFE".')
+    decided_by: str
+    reason: str
+    used: bool = Field(..., description="Whether the chunk was given to the model.")
+
+
+class RagAskResponse(BaseModel):
+    question: str
+    answer: str
+    answer_mode: str = Field(
+        ..., description='"llm", "passages" (no model available), "no_context" '
+                         '(nothing safe retrieved) or "blocked" (the question itself).')
+    question_screening: ClassifyResponse
+    chunks: list[RagChunk]
+    quarantined: int = Field(..., description="Retrieved chunks the guardrail blocked.")
+    latency_ms: float
