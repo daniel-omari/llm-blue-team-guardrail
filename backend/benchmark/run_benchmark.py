@@ -1,4 +1,4 @@
-"""Benchmark the guardrail against labelled SAFE/UNSAFE prompts.
+"""Benchmark the guardrail against labelled SAFE/UNSAFE prompts or documents.
 
 UNSAFE (an attack) is treated as the positive class. The harness reports a
 confusion matrix with accuracy, precision, recall, F1 and false-positive rate,
@@ -8,9 +8,17 @@ The dataset (cases.json) is seeded from the labelled cases in the SCC353 Secure
 AI coursework, plus a held-out split of fresh prompts that were not used when
 writing the heuristic rules, so the held-out figures estimate generalisation.
 
+With --documents it scores the document mode instead (indirect prompt injection
+in retrieved text): every chunk of the RAG knowledge base, labelled by which pages
+were deliberately poisoned, plus a held-out set of document snippets
+(document_cases.json) with benign text that merely mentions passwords or
+instructions, and injections in many styles (hidden comments, fake system tags,
+exfiltration links, tool calls, CV and peer-review manipulation).
+
 Run from the backend directory:
 
     python -m benchmark.run_benchmark
+    python -m benchmark.run_benchmark --documents
 
 With no LLM_API_KEY set the service runs heuristics-only, so the figures measure
 the fast first layer on its own. Set LLM_API_KEY to benchmark the full pipeline.
@@ -18,6 +26,7 @@ the fast first layer on its own. Set LLM_API_KEY to benchmark the full pipeline.
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import json
 import pathlib
@@ -28,8 +37,12 @@ from dataclasses import dataclass
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
 from app.guardrail import engine  # noqa: E402
+from app.rag.documents import load_corpus  # noqa: E402
 
 DATA_PATH = pathlib.Path(__file__).parent / "cases.json"
+DOCUMENT_DATA_PATH = pathlib.Path(__file__).parent / "document_cases.json"
+# The knowledge-base chunks that carry a planted injection (see rag/corpus/README.md)
+POISONED_CHUNKS = {"vendor-onboarding#2", "wiki-community-tips#2", "support-ticket-4471#2"}
 POSITIVE = "UNSAFE"
 
 
@@ -85,20 +98,37 @@ def compute_metrics(pairs: list[tuple[str, str]]) -> Metrics:
     return m
 
 
-async def evaluate(cases: dict) -> tuple[list[dict], bool]:
-    """Run every prompt through the guardrail and collect per-case records."""
+def document_cases() -> dict:
+    """The knowledge base (labelled by its poisoned chunks) plus the held-out snippets."""
+    corpus: dict[str, list[str]] = {"SAFE": [], "UNSAFE": []}
+    for chunk in load_corpus():
+        corpus["UNSAFE" if chunk.id in POISONED_CHUNKS else "SAFE"].append(chunk.text)
+    held_out = json.loads(DOCUMENT_DATA_PATH.read_text(encoding="utf-8"))
+    return {"knowledge_base": corpus, **held_out}
+
+
+async def evaluate(cases: dict, source: str = "prompt", pace: float = 0.0
+                   ) -> tuple[list[dict], bool]:
+    """Run every case through the guardrail and collect per-case records.
+
+    ``pace`` waits that many seconds after each case that reached the LLM judge, to
+    stay under a free tier's rate limit (e.g. 2.1 for Groq's 30 requests a minute).
+    """
     records: list[dict] = []
     judge_ran = False
     for split, labels in cases.items():
         for true_label, prompts in labels.items():
             for prompt in prompts:
-                result = await engine.classify(prompt)
+                result = await engine.classify(prompt, source=source)
                 if result["decided_by"] == "llm_judge":
                     judge_ran = True
+                if pace and result["decided_by"] != "heuristics":
+                    await asyncio.sleep(pace)
                 records.append({
                     "split": split,
                     "true": true_label,
                     "pred": result["verdict"],
+                    "decided_by": result["decided_by"],
                     "prompt": prompt,
                 })
     return records, judge_ran
@@ -112,11 +142,11 @@ def _format(m: Metrics) -> str:
     )
 
 
-def report(records: list[dict], judge_ran: bool) -> None:
+def report(records: list[dict], judge_ran: bool, source: str = "prompt") -> None:
     mode = "full pipeline (heuristics + LLM judge)" if judge_ran else \
         "heuristics-only (no LLM_API_KEY set)"
     print("=" * 72)
-    print("PROMPT GUARDRAIL BENCHMARK")
+    print(f"PROMPT GUARDRAIL BENCHMARK ({source}s)")
     print(f"mode: {mode}")
     print("=" * 72)
 
@@ -129,6 +159,11 @@ def report(records: list[dict], judge_ran: bool) -> None:
     print(f"\n[overall]  n={len(overall)}")
     print(_format(compute_metrics(overall)))
 
+    degraded = sum(r["decided_by"] == "heuristics_degraded" for r in records)
+    if judge_ran and degraded:
+        print(f"\nwarning: the LLM judge was unavailable for {degraded} case(s) "
+              "(rate limit?); rerun with a larger --pace for clean figures.")
+
     misses = [r for r in records if r["true"] != r["pred"]]
     if misses:
         print("\nmisclassified:")
@@ -139,9 +174,19 @@ def report(records: list[dict], judge_ran: bool) -> None:
 
 
 async def main() -> None:
-    cases = json.loads(DATA_PATH.read_text(encoding="utf-8"))
-    records, judge_ran = await evaluate(cases)
-    report(records, judge_ran)
+    parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    parser.add_argument("--documents", action="store_true",
+                        help="score document screening (indirect injection) instead of prompts")
+    parser.add_argument("--pace", type=float, default=0.0, metavar="SECONDS",
+                        help="pause after each judged case, to respect API rate limits")
+    args = parser.parse_args()
+
+    if args.documents:
+        cases, source = document_cases(), "document"
+    else:
+        cases, source = json.loads(DATA_PATH.read_text(encoding="utf-8")), "prompt"
+    records, judge_ran = await evaluate(cases, source, args.pace)
+    report(records, judge_ran, source)
 
 
 if __name__ == "__main__":
