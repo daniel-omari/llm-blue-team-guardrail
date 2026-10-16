@@ -40,6 +40,9 @@ class Settings(BaseSettings):
     rag_embedding_model: str = "BAAI/bge-small-en-v1.5"
     rag_model_cache_dir: str | None = None   # None = fastembed's default cache folder
     rag_top_k: int = 4
+    # Where chunk embeddings live: "memory" (NumPy), "pgvector" (Postgres), or "auto",
+    # which uses pgvector whenever DATABASE_URL points at Postgres.
+    rag_vector_store: Literal["auto", "memory", "pgvector"] = "auto"
 
     # Host headers the MCP endpoint (/mcp) accepts, comma-separated; ":*" means any
     # port. Add the public host name when deploying (DNS-rebinding protection).

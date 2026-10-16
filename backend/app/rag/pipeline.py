@@ -22,12 +22,12 @@ import threading
 import time
 from html import escape
 
-from app import llm
+from app import db, llm
 from app.config import settings
 from app.guardrail import engine
 from app.rag.documents import Chunk, load_corpus
 from app.rag.embeddings import Embedder
-from app.rag.store import VectorStore
+from app.rag.store import MemoryStore, PgVectorStore, VectorStore
 
 _ANSWER_SYSTEM = (
     "You are the internal help assistant of Halcyon Robotics. Answer the employee's "
@@ -44,12 +44,13 @@ class KnowledgeBaseUnavailable(Exception):
 
 
 class KnowledgeBase:
-    def __init__(self, embedder: Embedder, chunks: list[Chunk] | None = None):
+    def __init__(self, embedder: Embedder, chunks: list[Chunk] | None = None,
+                 store: str = "memory"):
         self.embedder = embedder
         chunks = load_corpus() if chunks is None else chunks
         # Embed the title and heading with the text, so a chunk can be found by topic.
         vectors = embedder.embed([f"{c.title}. {c.section}. {c.text}" for c in chunks])
-        self.store = VectorStore(chunks, vectors)
+        self.store: VectorStore = _make_store(store, chunks, vectors)
         self._screened: dict[str, dict] = {}
 
     def search(self, query: str, k: int) -> list[tuple[Chunk, float]]:
@@ -135,6 +136,17 @@ def _prompt(question: str, chunks: list[Chunk]) -> str:
     return f"Question: {question}\n\nReference documents:\n\n{documents}"
 
 
+def _make_store(kind: str, chunks: list[Chunk], vectors) -> VectorStore:
+    """"memory", "pgvector", or "auto": pgvector when the database is Postgres."""
+    engine = db.get_engine()
+    on_postgres = engine is not None and engine.dialect.name == "postgresql"
+    if kind == "pgvector" or (kind == "auto" and on_postgres):
+        if not on_postgres:
+            raise RuntimeError("the pgvector store needs DATABASE_URL to point at Postgres")
+        return PgVectorStore(engine, chunks, vectors)
+    return MemoryStore(chunks, vectors)
+
+
 # ---- The shared instance used by the API ----
 
 _instance: KnowledgeBase | None = None
@@ -149,7 +161,7 @@ def get_knowledge_base() -> KnowledgeBase:
             try:
                 from app.rag.embeddings import FastEmbedder
 
-                _instance = KnowledgeBase(FastEmbedder())
+                _instance = KnowledgeBase(FastEmbedder(), store=settings.rag_vector_store)
             except Exception as exc:  # model download / load failures of any kind
                 raise KnowledgeBaseUnavailable(f"{type(exc).__name__}: {exc}") from exc
         return _instance

@@ -10,14 +10,14 @@ from __future__ import annotations
 from collections.abc import Iterator
 from contextlib import contextmanager
 
-from sqlalchemy import create_engine
+from sqlalchemy import Engine, create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.config import settings
 from app.models import Base
 
-_engine = None
+_engine: Engine | None = None
 _SessionLocal: sessionmaker[Session] | None = None
 
 
@@ -43,6 +43,11 @@ def init_db() -> None:
         _engine = create_engine(url, pool_pre_ping=True, future=True)
     _SessionLocal = sessionmaker(bind=_engine, autoflush=False, expire_on_commit=False)
     Base.metadata.create_all(_engine)
+
+
+def get_engine() -> Engine | None:
+    """The configured engine, or None when no database is set up."""
+    return _engine
 
 
 def enabled() -> bool:

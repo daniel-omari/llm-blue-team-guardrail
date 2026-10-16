@@ -18,7 +18,7 @@ from app.main import app
 from app.rag import pipeline
 from app.rag.documents import Chunk, chunk_page, load_corpus
 from app.rag.embeddings import normalise
-from app.rag.store import VectorStore
+from app.rag.store import MemoryStore
 
 
 class HashingEmbedder:
@@ -69,7 +69,7 @@ def test_the_corpus_loads_every_page_but_not_its_readme():
 def test_the_store_ranks_by_cosine_similarity():
     chunks = [Chunk(str(i), "s", "t", "h", f"text {i}") for i in range(3)]
     vectors = normalise(np.array([[1, 0], [0.6, 0.8], [0, 1]], dtype=np.float32))
-    store = VectorStore(chunks, vectors)
+    store = MemoryStore(chunks, vectors)
     ranked = store.search(np.array([0, 1], dtype=np.float32), k=2)
     assert [c.id for c, _ in ranked] == ["2", "1"]
     assert ranked[0][1] == pytest.approx(1.0)
@@ -174,3 +174,10 @@ def test_the_real_embedding_model_finds_the_right_pages():
     charging = real.search("When does the robot go back to charge?", k=4)
     assert any(c.source == "product-faq.md" and c.section == "Battery and charging"
                for c, _ in charging)
+
+
+def test_auto_uses_the_in_memory_store_without_postgres():
+    kb = pipeline.KnowledgeBase(HashingEmbedder(), store="auto")   # tests run on SQLite
+    assert isinstance(kb.store, MemoryStore)
+    with pytest.raises(RuntimeError, match="Postgres"):
+        pipeline.KnowledgeBase(HashingEmbedder(), store="pgvector")
