@@ -8,6 +8,12 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Bake the RAG embedding model into the image, so the first question needs no download.
+ENV RAG_EMBEDDING_MODEL=BAAI/bge-small-en-v1.5 \
+    RAG_MODEL_CACHE_DIR=/app/models
+RUN python -c "import os; from fastembed import TextEmbedding; \
+TextEmbedding(os.environ['RAG_EMBEDDING_MODEL'], cache_dir=os.environ['RAG_MODEL_CACHE_DIR'])"
+
 COPY app ./app
 
 EXPOSE 8000

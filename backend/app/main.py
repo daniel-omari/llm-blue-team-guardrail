@@ -38,8 +38,11 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(
     title="Prompt Guardrail",
-    version="0.1.0",
-    summary="A layered guardrail that screens prompts for injection and jailbreak attempts.",
+    version="0.2.0",
+    summary=(
+        "A layered guardrail that screens prompts and retrieved documents for injection,"
+        " with a guarded RAG demo and an MCP server for AI agents."
+    ),
     lifespan=lifespan,
 )
 
