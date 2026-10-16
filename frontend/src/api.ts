@@ -35,3 +35,42 @@ export async function classifyPrompt(prompt: string): Promise<ClassifyResponse> 
   }
   return res.json();
 }
+
+// ---- Knowledge base (guarded RAG) ----
+
+export interface RagChunk {
+  id: string;
+  title: string;
+  section: string;
+  source: string;
+  text: string;
+  score: number;
+  verdict: "SAFE" | "UNSAFE";
+  decided_by: string;
+  reason: string;
+  used: boolean;
+}
+
+export interface RagResponse {
+  question: string;
+  answer: string;
+  answer_mode: "llm" | "passages" | "no_context" | "blocked";
+  question_screening: ClassifyResponse;
+  chunks: RagChunk[];
+  quarantined: number;
+  latency_ms: number;
+}
+
+// Ask the knowledge base a question; every retrieved chunk is screened server-side.
+export async function askKnowledgeBase(question: string): Promise<RagResponse> {
+  const res = await fetch(`${API_BASE}/rag/ask`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ question }),
+  });
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`API error ${res.status}: ${detail}`);
+  }
+  return res.json();
+}

@@ -12,32 +12,50 @@ Decision policy (defence in depth):
 
 The response is fully explainable: it reports the final verdict, which layers
 ran, what each found, and the end-to-end latency.
+
+The same pipeline screens two kinds of text. A *prompt* is what a user types. A
+*document* is text retrieved for an LLM to read (the RAG knowledge base), where
+the threat is indirect prompt injection: instructions planted in the content.
+Documents legitimately talk about passwords and credentials ("never share your
+password"), so for them a credential mention is only a signal for the judge,
+not a block on sight.
 """
 
 from __future__ import annotations
 
 import time
 from dataclasses import asdict
+from typing import Literal
 
 from app.guardrail import heuristics, llm_judge
 
-# Categories we trust enough to block on the heuristic layer alone.
-_BLOCK_ON_SIGHT = {
-    "instruction_override",
-    "prompt_extraction",
-    "secret_extraction",
-    "roleplay_override",
-    "multilingual_injection",
+Source = Literal["prompt", "document"]
+
+# Categories we trust enough to block on the heuristic layer alone, per source.
+_BLOCK_ON_SIGHT: dict[Source, set[str]] = {
+    "prompt": {
+        "instruction_override",
+        "prompt_extraction",
+        "secret_extraction",
+        "roleplay_override",
+        "multilingual_injection",
+    },
+    "document": {
+        "instruction_override",
+        "prompt_extraction",
+        "roleplay_override",
+        "multilingual_injection",
+    },
 }
 
 
-async def classify(prompt: str) -> dict:
-    """Run a prompt through both layers and return the combined, explainable verdict."""
+async def classify(text: str, source: Source = "prompt") -> dict:
+    """Run text through both layers and return the combined, explainable verdict."""
     started = time.perf_counter()
 
-    hits = heuristics.scan(prompt)
+    hits = heuristics.scan(text)
     hit_categories = {h.category for h in hits}
-    heuristic_block = bool(hit_categories & _BLOCK_ON_SIGHT)
+    heuristic_block = bool(hit_categories & _BLOCK_ON_SIGHT[source])
 
     layers: list[dict] = [
         {
@@ -54,9 +72,9 @@ async def classify(prompt: str) -> dict:
         reason = hits[0].reason
         decided_by = "heuristics"
         layers.append({"name": "llm_judge", "ran": False, "verdict": "SKIPPED",
-                        "reason": "Heuristic layer already blocked the prompt."})
+                        "reason": f"Heuristic layer already blocked the {source}."})
     else:
-        judged = await llm_judge.judge(prompt)
+        judged = await llm_judge.judge(text, source)
         layers.append({
             "name": "llm_judge",
             "ran": judged.available,

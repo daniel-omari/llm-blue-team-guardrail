@@ -1,6 +1,8 @@
 services:
   db:
-    image: postgres:16-alpine
+    # Postgres with the pgvector extension: request history plus the RAG demo's
+    # chunk embeddings (the API picks the pgvector store automatically).
+    image: pgvector/pgvector:pg16
     environment:
       POSTGRES_USER: guardrail
       POSTGRES_PASSWORD: guardrail
@@ -18,7 +20,10 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg://guardrail:guardrail@db:5432/guardrail
       LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_PROVIDER: ${LLM_PROVIDER:-anthropic}
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
       LLM_MODEL: ${LLM_MODEL:-claude-haiku-4-5-20251001}
+      LLM_REASONING_EFFORT: ${LLM_REASONING_EFFORT:-}
       CORS_ORIGINS: http://localhost:8080
     depends_on:
       db:

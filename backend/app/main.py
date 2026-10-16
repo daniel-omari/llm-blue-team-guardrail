@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 from contextlib import asynccontextmanager
 
@@ -10,24 +11,38 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select
 
-from app import db
+from app import db, mcp_server
 from app.config import settings
 from app.guardrail import engine
 from app.models import Classification
-from app.schemas import ClassifyRequest, ClassifyResponse, HistoryItem
+from app.rag import pipeline as rag
+from app.schemas import (
+    ClassifyRequest,
+    ClassifyResponse,
+    HistoryItem,
+    RagAskRequest,
+    RagAskResponse,
+)
+
+# The MCP server's HTTP transport (see app/mcp_server.py), served at /mcp
+_mcp_http = mcp_server.http_app()
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    """Initialise the database (if one is configured) when the app starts up."""
+    """Initialise the database (if one is configured) and run the MCP session manager."""
     db.init_db()
-    yield
+    async with mcp_server.server.session_manager.run():
+        yield
 
 
 app = FastAPI(
     title="Prompt Guardrail",
-    version="0.1.0",
-    summary="A layered guardrail that screens prompts for injection and jailbreak attempts.",
+    version="0.2.0",
+    summary=(
+        "A layered guardrail that screens prompts and retrieved documents for injection,"
+        " with a guarded RAG demo and an MCP server for AI agents."
+    ),
     lifespan=lifespan,
 )
 
@@ -85,6 +100,22 @@ async def history(limit: int = 50) -> list[HistoryItem]:
             )
             for r in rows
         ]
+
+
+@app.post("/rag/ask", response_model=RagAskResponse)
+async def rag_ask(req: RagAskRequest) -> RagAskResponse:
+    """Answer a question from the knowledge base, screening every retrieved chunk."""
+    try:
+        kb = await asyncio.to_thread(rag.get_knowledge_base)
+    except rag.KnowledgeBaseUnavailable as exc:
+        raise HTTPException(
+            status_code=503, detail=f"Knowledge base unavailable ({exc})."
+        ) from exc
+    return RagAskResponse(**await kb.ask(req.question, req.top_k))
+
+
+# MCP for AI agents: the guardrail's tools over Streamable HTTP at /mcp
+app.router.routes.extend(_mcp_http.routes)
 
 
 # Serve the built React frontend when it is present, so a single container can
