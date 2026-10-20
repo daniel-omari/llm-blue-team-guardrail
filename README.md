@@ -165,7 +165,8 @@ names in `MCP_ALLOWED_HOSTS`).
 | POST   | `/classify` | Screen a single prompt and return a layered verdict         |
 | POST   | `/rag/ask`  | Answer from the knowledge base, screening every retrieved section |
 | POST   | `/mcp`      | MCP endpoint for AI agents (Streamable HTTP)                |
-| GET    | `/history`  | Recent classifications (requires a database)                |
+| GET    | `/stats`    | Aggregate counts and average latencies (no prompt text)     |
+| GET    | `/history`  | Admin only: recent classifications with prompts (`ADMIN_TOKEN`) |
 | GET    | `/health`   | Liveness plus which optional features are enabled           |
 
 Interactive API docs are served at `/docs` (FastAPI / OpenAPI).
@@ -207,7 +208,7 @@ npm run dev                        # http://localhost:5173 (proxies /api -> :800
 
 Configuration is via environment variables or `backend/.env` (see
 `backend/.env.example`). Every external dependency is optional: with no
-`DATABASE_URL` history uses a local SQLite file and RAG uses the in-memory
+`DATABASE_URL` request logging uses a local SQLite file and RAG uses the in-memory
 index, and with no `LLM_API_KEY` the service runs heuristics-only and the RAG
 demo returns the clean passages instead of a generated answer.
 
@@ -218,7 +219,8 @@ demo returns the clean passages instead of a generated answer.
 | `LLM_BASE_URL`         | the provider's official API  | e.g. `https://api.groq.com/openai/v1`             |
 | `LLM_MODEL`            | `claude-haiku-4-5-20251001`  | Model name at that provider                        |
 | `LLM_REASONING_EFFORT` | none                         | e.g. `low` for reasoning models                    |
-| `DATABASE_URL`         | `sqlite:///./guardrail.db`   | Postgres URL switches history and RAG to Postgres  |
+| `DATABASE_URL`         | `sqlite:///./guardrail.db`   | Postgres URL switches logging and RAG to Postgres  |
+| `ADMIN_TOKEN`          | none (history off)           | Bearer token that enables the admin-only `/history` |
 | `RAG_VECTOR_STORE`     | `auto`                       | `auto`, `memory` or `pgvector`                     |
 | `MCP_ALLOWED_HOSTS`    | `localhost:*,127.0.0.1:*`    | Host names the `/mcp` endpoint answers to          |
 
@@ -293,7 +295,7 @@ container, Bandit, pip-audit), CodeQL, Dependabot, Hugging Face Spaces.
 
 - Rate limiting and API-key auth for the public API and MCP endpoints.
 - Larger public benchmarks for indirect injection (e.g. BIPIA) and jailbreaks.
-- Per-category policy thresholds, and an analytics dashboard over `/history`.
+- Per-category policy thresholds, and an analytics dashboard over the logged checks.
 - Screen documents once at ingestion time for large knowledge bases, storing the
   verdict next to the embedding.
 

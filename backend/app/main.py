@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import asyncio
 import os
+import secrets
 from contextlib import asynccontextmanager
+from typing import Annotated
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import select
+from sqlalchemy import case, func, select
 
 from app import db, mcp_server
 from app.config import settings
@@ -22,6 +25,7 @@ from app.schemas import (
     HistoryItem,
     RagAskRequest,
     RagAskResponse,
+    StatsResponse,
 )
 
 # The MCP server's HTTP transport (see app/mcp_server.py), served at /mcp
@@ -78,9 +82,61 @@ async def classify(req: ClassifyRequest) -> ClassifyResponse:
     return ClassifyResponse(**result)
 
 
-@app.get("/history", response_model=list[HistoryItem])
+# Decisions where the heuristic layer answered on its own (no judge call).
+_HEURISTIC_PATHS = ("heuristics", "heuristics_degraded")
+
+
+@app.get("/stats", response_model=StatsResponse)
+async def stats() -> StatsResponse:
+    """Aggregate numbers across all screened prompts: counts and average latencies only."""
+    if not db.enabled():
+        raise HTTPException(status_code=503, detail="Stats require a configured database.")
+    c = Classification
+    with db.session_scope() as s:
+        unsafe = func.sum(case((c.verdict == "UNSAFE", 1), else_=0))
+        total, blocked = s.execute(
+            select(func.count(c.id), func.coalesce(unsafe, 0))
+        ).one()
+        heuristics_avg = s.execute(
+            select(func.avg(c.latency_ms)).where(c.decided_by.in_(_HEURISTIC_PATHS))
+        ).scalar()
+        judge_avg = s.execute(
+            select(func.avg(c.latency_ms)).where(c.decided_by == "llm_judge")
+        ).scalar()
+    return StatsResponse(
+        total=total,
+        blocked=blocked,
+        allowed=total - blocked,
+        heuristics_avg_ms=None if heuristics_avg is None else round(heuristics_avg, 2),
+        judge_avg_ms=None if judge_avg is None else round(judge_avg, 2),
+    )
+
+
+_bearer = HTTPBearer(auto_error=False)
+
+
+def require_admin(
+    creds: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
+) -> None:
+    """Allow the request only with the configured admin token.
+
+    With no ADMIN_TOKEN set the endpoint does not exist (404), so a public demo never
+    serves other visitors' prompts. The comparison is constant-time.
+    """
+    if not settings.admin_token:
+        raise HTTPException(status_code=404, detail="Not Found")
+    if creds is None or not secrets.compare_digest(
+        creds.credentials.encode(), settings.admin_token.encode()
+    ):
+        raise HTTPException(
+            status_code=401, detail="Admin token required.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+
+@app.get("/history", response_model=list[HistoryItem], dependencies=[Depends(require_admin)])
 async def history(limit: int = 50) -> list[HistoryItem]:
-    """Return the most recent classifications (requires a configured database)."""
+    """Admin only: the most recent classifications, including the raw prompts."""
     if not db.enabled():
         raise HTTPException(status_code=503, detail="History requires a configured database.")
     limit = max(1, min(limit, 200))

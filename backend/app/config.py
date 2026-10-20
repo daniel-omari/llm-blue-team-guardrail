@@ -15,10 +15,15 @@ class Settings(BaseSettings):
     # loads when an agent (e.g. Claude Desktop) starts the MCP server from elsewhere.
     model_config = SettingsConfigDict(env_file=_ENV_FILE, extra="ignore")
 
-    # Database for request logging / history. Defaults to a local SQLite file so
-    # /history works with zero setup; set DATABASE_URL to a Postgres URL
+    # Database for request logging (/stats, /history). Defaults to a local SQLite file
+    # so it works with zero setup; set DATABASE_URL to a Postgres URL
     # (postgresql+psycopg://...) for Docker/production.
     database_url: str = "sqlite:///./guardrail.db"
+
+    # Bearer token for the admin-only /history endpoint, which returns raw prompts.
+    # Unset (the default) switches /history off, so a public demo never exposes what
+    # other visitors typed. Aggregate numbers are always available from /stats.
+    admin_token: str | None = None
 
     # Hosted LLM (the judge layer, and answers in the RAG demo). Two wire formats:
     #   "anthropic": the Anthropic Messages API (the default)
