@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { askKnowledgeBase, type RagChunk, type RagResponse } from "./api";
-import { Badge, prettyLabel } from "./ui";
+import type { KnightState } from "./Knight";
+import { ActionButton, Badge, prettyLabel } from "./ui";
 
 // Questions that each retrieve one of the poisoned pages, plus a control case.
 const QUESTIONS: { label: string; question: string }[] = [
@@ -21,7 +22,7 @@ const MODE_NOTES: Record<RagResponse["answer_mode"], string> = {
 // One retrieved section, with what the guardrail decided about it.
 function ChunkCard({ chunk }: { chunk: RagChunk }) {
   return (
-    <div className={`chunk ${chunk.used ? "" : "chunk-blocked"}`}>
+    <div className={`chunk ${chunk.used ? "chunk-ok" : "chunk-blocked"}`}>
       <div className="chunk-head">
         <div>
           <div className="chunk-title">{chunk.title}</div>
@@ -40,20 +41,24 @@ function ChunkCard({ chunk }: { chunk: RagChunk }) {
   );
 }
 
-// The "Knowledge base" tab: ask a question, see the answer and every retrieved section.
-export default function KnowledgeBase() {
+// "Knowledge base" mode: ask a question, see the answer and every retrieved section.
+export default function KnowledgeBase({ onState }: { onState: (s: KnightState) => void }) {
   const [question, setQuestion] = useState("");
   const [data, setData] = useState<RagResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function onAsk() {
-    if (!question.trim()) return;
+    if (!question.trim() || loading) return;
     setLoading(true);
     setError(null);
     setData(null);
+    onState("idle");
     try {
-      setData(await askKnowledgeBase(question));
+      const result = await askKnowledgeBase(question);
+      setData(result);
+      // Anything blocked or quarantined counts as a caught threat.
+      onState(result.answer_mode === "blocked" || result.quarantined > 0 ? "unsafe" : "safe");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Request failed");
     } finally {
@@ -62,7 +67,7 @@ export default function KnowledgeBase() {
   }
 
   return (
-    <section>
+    <>
       <p className="intro">
         Ask about <strong>Halcyon Robotics</strong>, a fictional company whose internal wiki
         this demo searches. Three pages hide instructions aimed at AI assistants (indirect
@@ -70,7 +75,7 @@ export default function KnowledgeBase() {
         quarantined before the model sees them.
       </p>
 
-      <div className="samples">
+      <div className="chips">
         {QUESTIONS.map((q) => (
           <button key={q.label} className="chip" onClick={() => setQuestion(q.question)}>
             {q.label}
@@ -78,36 +83,41 @@ export default function KnowledgeBase() {
         ))}
       </div>
 
-      <textarea
-        value={question}
-        onChange={(e) => setQuestion(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && !e.shiftKey) {
-            e.preventDefault();
-            void onAsk();
-          }
-        }}
-        placeholder="Ask a question about the company wiki..."
-        rows={2}
-      />
+      <label className="prompt">
+        <span aria-hidden="true">&gt;</span>
+        <textarea
+          value={question}
+          onChange={(e) => setQuestion(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              void onAsk();
+            }
+          }}
+          placeholder="Ask a question about the company wiki..."
+          aria-label="Question for the knowledge base"
+          rows={2}
+        />
+      </label>
 
-      <button className="screen" onClick={onAsk} disabled={loading || !question.trim()}>
-        {loading ? "Searching..." : "Ask"}
-      </button>
+      <div className="row">
+        <ActionButton onClick={onAsk} disabled={loading || !question.trim()}>
+          {loading ? "Searching..." : "Ask"}
+        </ActionButton>
+        <span className="hint">Enter</span>
+      </div>
 
       {error && <div className="error">{error}</div>}
 
       {data && (
-        <div className="result">
-          <div className="result-head">
-            <span className={`mode mode-${data.answer_mode}`}>{data.answer_mode.replace("_", " ")}</span>
-            <div className="meta">
-              <span>{data.chunks.length} sections retrieved</span>
-              <span>
-                <strong>{data.quarantined}</strong> quarantined
-              </span>
-              <span>{data.latency_ms.toFixed(0)} ms</span>
-            </div>
+        <div className={`out ${data.answer_mode === "blocked" || data.quarantined > 0 ? "out-u" : "out-s"}`} aria-live="polite">
+          <div className="v-head">
+            <span className={`tag answer-mode mode-${data.answer_mode}`}>{data.answer_mode.replace("_", " ")}</span>
+            <span className="meta">
+              {data.chunks.length} sections retrieved {"\u00b7 "}
+              <b>{data.quarantined}</b> quarantined {"\u00b7 "}
+              {data.latency_ms.toFixed(0)} ms
+            </span>
           </div>
           <p className="answer">{data.answer}</p>
           <p className="mode-note">{MODE_NOTES[data.answer_mode]}</p>
@@ -121,6 +131,6 @@ export default function KnowledgeBase() {
           )}
         </div>
       )}
-    </section>
+    </>
   );
 }

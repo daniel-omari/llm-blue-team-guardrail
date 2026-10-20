@@ -1,7 +1,8 @@
 import { useRef, useState } from "react";
 import { classifyPrompt, type ClassifyResponse } from "./api";
+import Knight, { type KnightState } from "./Knight";
 import KnowledgeBase from "./KnowledgeBase";
-import { Badge, prettyLabel } from "./ui";
+import { ActionButton, Badge, ThemeToggle, prettyLabel } from "./ui";
 
 // Each category holds several prompts; clicking a chip cycles to a fresh one so
 // the demo doesn't feel canned. The first entry is the "headline" example.
@@ -51,20 +52,16 @@ function Result({ data }: { data: ClassifyResponse }) {
   // show a plain "heuristics only" note instead of a misleading percentage.
   const judgeRan = data.decided_by !== "heuristics_degraded";
   return (
-    <div className="result">
-      <div className="result-head">
-        <Badge verdict={data.verdict} />
-        <div className="meta">
-          <span>
-            decided by <strong>{prettyLabel(data.decided_by)}</strong>
-          </span>
-          {judgeRan ? (
-            <span>confidence {(data.confidence * 100).toFixed(0)}%</span>
-          ) : (
-            <span>heuristics only</span>
-          )}
-          <span>{data.latency_ms.toFixed(1)} ms</span>
-        </div>
+    <div className={`out ${data.verdict === "UNSAFE" ? "out-u" : "out-s"}`} aria-live="polite">
+      <div className="v-head">
+        <Badge verdict={data.verdict} big />
+        <span className="meta">
+          decided by <b>{prettyLabel(data.decided_by)}</b>
+          {" \u00b7 "}
+          {judgeRan ? `${(data.confidence * 100).toFixed(0)}%` : "heuristics only"}
+          {" \u00b7 "}
+          {data.latency_ms.toFixed(1)} ms
+        </span>
       </div>
       <p className="reason">{data.reason}</p>
 
@@ -73,9 +70,7 @@ function Result({ data }: { data: ClassifyResponse }) {
           <div key={layer.name} className={`layer ${layer.ran ? "" : "layer-off"}`}>
             <div className="layer-head">
               <span className="layer-name">{prettyLabel(layer.name)}</span>
-              <span className="layer-verdict">
-                {layer.ran ? layer.verdict : "skipped"}
-              </span>
+              {layer.ran ? <Badge verdict={layer.verdict} /> : <span className="tag k">skipped</span>}
             </div>
             {layer.reason && <p className="layer-reason">{layer.reason}</p>}
             {layer.findings && layer.findings.length > 0 && (
@@ -94,8 +89,8 @@ function Result({ data }: { data: ClassifyResponse }) {
   );
 }
 
-// The "Screen a prompt" tab: prompt box, sample attacks, and the result card.
-function PromptScreen() {
+// "Prompt" mode: prompt box, sample attacks, and the verdict.
+function PromptScreen({ onState }: { onState: (s: KnightState) => void }) {
   const [prompt, setPrompt] = useState("");
   const [data, setData] = useState<ClassifyResponse | null>(null);
   const [loading, setLoading] = useState(false);
@@ -116,12 +111,15 @@ function PromptScreen() {
 
   // Send the current prompt to the API and store the returned verdict.
   async function onScreen() {
-    if (!prompt.trim()) return;
+    if (!prompt.trim() || loading) return;
     setLoading(true);
     setError(null);
     setData(null);
+    onState("idle");
     try {
-      setData(await classifyPrompt(prompt));
+      const result = await classifyPrompt(prompt);
+      setData(result);
+      onState(result.verdict === "UNSAFE" ? "unsafe" : "safe");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Request failed");
     } finally {
@@ -130,8 +128,8 @@ function PromptScreen() {
   }
 
   return (
-    <section>
-      <div className="samples">
+    <>
+      <div className="chips">
         {SAMPLES.map((s) => (
           <button key={s.label} className="chip" onClick={() => pickSample(s.label, s.prompts)}>
             {s.label}
@@ -139,57 +137,101 @@ function PromptScreen() {
         ))}
       </div>
 
-      <textarea
-        value={prompt}
-        onChange={(e) => setPrompt(e.target.value)}
-        placeholder="Paste a user prompt to screen..."
-        rows={5}
-      />
+      <label className="prompt">
+        <span aria-hidden="true">&gt;</span>
+        <textarea
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+              e.preventDefault();
+              void onScreen();
+            }
+          }}
+          placeholder="Paste a user prompt to screen..."
+          aria-label="Prompt to screen"
+          rows={5}
+        />
+      </label>
 
-      <button className="screen" onClick={onScreen} disabled={loading || !prompt.trim()}>
-        {loading ? "Screening..." : "Screen prompt"}
-      </button>
+      <div className="row">
+        <ActionButton onClick={onScreen} disabled={loading || !prompt.trim()}>
+          {loading ? "Screening..." : "Screen prompt"}
+        </ActionButton>
+        <span className="hint">Ctrl + Enter</span>
+      </div>
 
       {error && <div className="error">{error}</div>}
       {data && <Result data={data} />}
-    </section>
+    </>
   );
 }
 
-type Tab = "prompt" | "rag";
+type Mode = "prompt" | "rag";
 
-// Top-level page: header, tab switcher, and the active tab.
+const HEADINGS: Record<KnightState, string> = {
+  idle: "GUARDIAN ONLINE",
+  safe: "ALL CLEAR",
+  unsafe: "THREAT BLOCKED",
+};
+
+const INTROS: Record<Mode, string> = {
+  prompt: "Paste a prompt and I'll check it before it reaches the model.",
+  rag: "Ask the company wiki. I'll screen every section it pulls in.",
+};
+
+// Top-level page: header, the console with the knight, and the active mode.
 export default function App() {
-  const [tab, setTab] = useState<Tab>("prompt");
+  const [mode, setMode] = useState<Mode>("prompt");
+  // Each mode keeps its own last verdict, so switching back shows the right face.
+  const [states, setStates] = useState<Record<Mode, KnightState>>({ prompt: "idle", rag: "idle" });
+  const knight = states[mode];
+  const setFor = (m: Mode) => (s: KnightState) => setStates((prev) => ({ ...prev, [m]: s }));
+
   return (
-    <div className="app">
-      <header>
-        <h1>Prompt Guardrail</h1>
-        <p className="tagline">
-          A layered guardrail that screens prompts for injection and jailbreak
-          attempts, using a fast heuristic pass and then a hosted-LLM judge for
-          the ambiguous ones. It also guards a RAG pipeline, and is available to AI
-          agents as an MCP server.
-        </p>
+    <div className="wrap">
+      <header className="top">
+        <div>
+          <h1 className="brand">
+            PROMPT<b>/</b>GUARDRAIL
+          </h1>
+          <p className="sub">
+            Screens prompts for injection and jailbreak attempts with fast heuristics and an LLM
+            judge, guards a RAG pipeline, and runs as an MCP server for AI agents.
+          </p>
+        </div>
+        <ThemeToggle />
       </header>
 
-      <nav className="tabs" role="tablist">
-        <button role="tab" aria-selected={tab === "prompt"} className={tab === "prompt" ? "tab active" : "tab"}
-                onClick={() => setTab("prompt")}>
-          Screen a prompt
-        </button>
-        <button role="tab" aria-selected={tab === "rag"} className={tab === "rag" ? "tab active" : "tab"}
-                onClick={() => setTab("rag")}>
-          Knowledge base
-        </button>
-      </nav>
+      <main className="main">
+        <section className="console hudbox">
+          <div className="chead">
+            <Knight state={knight} />
+            <div className="ctitle">
+              <h2>{HEADINGS[knight]}</h2>
+              <p>{INTROS[mode]}</p>
+            </div>
+            <div className="mode" role="tablist" aria-label="Mode">
+              <button role="tab" aria-selected={mode === "prompt"} className={mode === "prompt" ? "on" : ""}
+                      onClick={() => setMode("prompt")}>
+                Prompt
+              </button>
+              <button role="tab" aria-selected={mode === "rag"} className={mode === "rag" ? "on" : ""}
+                      onClick={() => setMode("rag")}>
+                Knowledge base
+              </button>
+            </div>
+          </div>
 
-      {/* Both stay mounted, so switching tabs keeps each one's input and result */}
-      <div hidden={tab !== "prompt"}><PromptScreen /></div>
-      <div hidden={tab !== "rag"}><KnowledgeBase /></div>
+          {/* Both stay mounted, so switching modes keeps each one's input and result */}
+          <div hidden={mode !== "prompt"}><PromptScreen onState={setFor("prompt")} /></div>
+          <div hidden={mode !== "rag"}><KnowledgeBase onState={setFor("rag")} /></div>
+        </section>
+      </main>
 
       <footer>
-        Productized from the guardrail in my SCC353 Secure AI coursework. Source on GitHub.
+        Productized from the guardrail in my SCC353 Secure AI coursework.{" "}
+        <a href="https://github.com/daniel-omari/llm-blue-team-guardrail">Source on GitHub</a>
       </footer>
     </div>
   );
