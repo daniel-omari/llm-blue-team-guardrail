@@ -1,8 +1,10 @@
-import { useRef, useState } from "react";
-import { classifyPrompt, type ClassifyResponse } from "./api";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { classifyPrompt, fetchStats, type ClassifyResponse, type RagResponse, type Stats } from "./api";
 import Knight, { type KnightState } from "./Knight";
 import KnowledgeBase from "./KnowledgeBase";
-import { ActionButton, Badge, ThemeToggle, prettyLabel } from "./ui";
+import StatsStrip from "./StatsStrip";
+import ThreatLog, { addEntry, loadLog, saveLog, type LogEntry, type Mode } from "./ThreatLog";
+import { ActionButton, Badge, ThemeToggle, prettyLabel, type Load } from "./ui";
 
 // Each category holds several prompts; clicking a chip cycles to a fresh one so
 // the demo doesn't feel canned. The first entry is the "headline" example.
@@ -90,13 +92,27 @@ function Result({ data }: { data: ClassifyResponse }) {
 }
 
 // "Prompt" mode: prompt box, sample attacks, and the verdict.
-function PromptScreen({ onState }: { onState: (s: KnightState) => void }) {
+function PromptScreen(props: {
+  onStart: () => void;
+  onResult: (r: ClassifyResponse, prompt: string) => void;
+  load: Load | null;
+}) {
+  const { onStart, onResult, load } = props;
   const [prompt, setPrompt] = useState("");
   const [data, setData] = useState<ClassifyResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Remember the last prompt shown per category so repeat clicks don't repeat.
   const lastShown = useRef<Record<string, number>>({});
+  const input = useRef<HTMLTextAreaElement>(null);
+
+  // A check picked from the threat log is loaded back in, ready to run again.
+  useEffect(() => {
+    if (!load) return;
+    setPrompt(load.text);
+    setData(null);
+    input.current?.focus();
+  }, [load]);
 
   // Pick a fresh prompt for a category, avoiding the one shown on the last click.
   function pickSample(label: string, prompts: string[]) {
@@ -115,11 +131,11 @@ function PromptScreen({ onState }: { onState: (s: KnightState) => void }) {
     setLoading(true);
     setError(null);
     setData(null);
-    onState("idle");
+    onStart();
     try {
       const result = await classifyPrompt(prompt);
       setData(result);
-      onState(result.verdict === "UNSAFE" ? "unsafe" : "safe");
+      onResult(result, prompt);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Request failed");
     } finally {
@@ -140,6 +156,7 @@ function PromptScreen({ onState }: { onState: (s: KnightState) => void }) {
       <label className="prompt">
         <span aria-hidden="true">&gt;</span>
         <textarea
+          ref={input}
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
           onKeyDown={(e) => {
@@ -167,8 +184,6 @@ function PromptScreen({ onState }: { onState: (s: KnightState) => void }) {
   );
 }
 
-type Mode = "prompt" | "rag";
-
 const HEADINGS: Record<KnightState, string> = {
   idle: "GUARDIAN ONLINE",
   safe: "ALL CLEAR",
@@ -180,13 +195,59 @@ const INTROS: Record<Mode, string> = {
   rag: "Ask the company wiki. I'll screen every section it pulls in.",
 };
 
-// Top-level page: header, the console with the knight, and the active mode.
+// Top-level page: header, stats strip, the console with the knight, and the threat log.
 export default function App() {
   const [mode, setMode] = useState<Mode>("prompt");
   // Each mode keeps its own last verdict, so switching back shows the right face.
   const [states, setStates] = useState<Record<Mode, KnightState>>({ prompt: "idle", rag: "idle" });
+  const [log, setLog] = useState<LogEntry[]>(loadLog);
+  const [stats, setStats] = useState<Stats | null>(null);
+  const [loads, setLoads] = useState<Record<Mode, Load | null>>({ prompt: null, rag: null });
   const knight = states[mode];
-  const setFor = (m: Mode) => (s: KnightState) => setStates((prev) => ({ ...prev, [m]: s }));
+
+  const refreshStats = useCallback(() => {
+    void fetchStats().then(setStats);
+  }, []);
+  useEffect(refreshStats, [refreshStats]);
+  useEffect(() => saveLog(log), [log]);
+
+  const setFace = (m: Mode, s: KnightState) => setStates((prev) => ({ ...prev, [m]: s }));
+
+  function onPromptResult(r: ClassifyResponse, text: string) {
+    setFace("prompt", r.verdict === "UNSAFE" ? "unsafe" : "safe");
+    setLog((prev) =>
+      addEntry(prev, {
+        mode: "prompt",
+        verdict: r.verdict,
+        by: prettyLabel(r.decided_by),
+        path: r.decided_by === "llm_judge" ? "judge" : "heuristics",
+        text,
+        ms: r.latency_ms,
+      }),
+    );
+    refreshStats();
+  }
+
+  function onRagResult(r: RagResponse, text: string) {
+    // Anything blocked or quarantined counts as a caught threat.
+    const caught = r.answer_mode === "blocked" || r.quarantined > 0;
+    setFace("rag", caught ? "unsafe" : "safe");
+    setLog((prev) =>
+      addEntry(prev, {
+        mode: "rag",
+        verdict: caught ? "UNSAFE" : "SAFE",
+        by: r.answer_mode === "blocked" ? "question blocked" : `${r.quarantined}/${r.chunks.length} quarantined`,
+        path: "rag",
+        text,
+        ms: r.latency_ms,
+      }),
+    );
+  }
+
+  function pick(e: LogEntry) {
+    setMode(e.mode);
+    setLoads((prev) => ({ ...prev, [e.mode]: { text: e.text, nonce: Date.now() } }));
+  }
 
   return (
     <div className="wrap">
@@ -202,6 +263,8 @@ export default function App() {
         </div>
         <ThemeToggle />
       </header>
+
+      <StatsStrip server={stats} entries={log} />
 
       <main className="main">
         <section className="console hudbox">
@@ -224,9 +287,15 @@ export default function App() {
           </div>
 
           {/* Both stay mounted, so switching modes keeps each one's input and result */}
-          <div hidden={mode !== "prompt"}><PromptScreen onState={setFor("prompt")} /></div>
-          <div hidden={mode !== "rag"}><KnowledgeBase onState={setFor("rag")} /></div>
+          <div hidden={mode !== "prompt"}>
+            <PromptScreen onStart={() => setFace("prompt", "idle")} onResult={onPromptResult} load={loads.prompt} />
+          </div>
+          <div hidden={mode !== "rag"}>
+            <KnowledgeBase onStart={() => setFace("rag", "idle")} onResult={onRagResult} load={loads.rag} />
+          </div>
         </section>
+
+        <ThreatLog entries={log} onPick={pick} onClear={() => setLog([])} />
       </main>
 
       <footer>

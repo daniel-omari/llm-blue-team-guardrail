@@ -91,7 +91,7 @@ code { font-family: inherit; }
 .wrap {
   position: relative;
   z-index: 1;
-  max-width: 920px;
+  max-width: 1180px;
   margin: 0 auto;
   padding: 1.4rem 1rem 3rem;
 }
@@ -138,7 +138,29 @@ code { font-family: inherit; }
 .hudbox::before { top: -2px; left: -2px; border-right: 0; border-bottom: 0; }
 .hudbox::after { bottom: -2px; right: -2px; border-left: 0; border-top: 0; }
 
-.main { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+/* ---- Stats strip ---- */
+.hud { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 14px; }
+.cell { background: var(--panel); padding: 0.7rem 0.9rem; }
+.num { font: 400 2.4rem/1 "VT323", monospace; color: var(--accent-hi); }
+.num.s { color: var(--mint); }
+.num small { font-size: 1.1rem; margin-left: 2px; }
+.lbl { font-size: 0.7rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.1em; }
+.hud-scope {
+  grid-column: 1 / -1;
+  margin: -4px 0 0;
+  text-align: right;
+  font-size: 0.68rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+/* ---- Main area: console + threat log side by side on wide screens ---- */
+.main { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; align-items: start; }
+@media (min-width: 980px) {
+  .main { grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); }
+  .feed { position: sticky; top: 1rem; max-height: calc(100vh - 2rem); }
+}
 .console { background: var(--panel); padding: 1rem 1.1rem 1.2rem; }
 
 .chead { display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem; }
@@ -227,6 +249,57 @@ code { font-family: inherit; }
 @keyframes kn-f1 { 0% { opacity: 0; } 25% { opacity: 1; } 50% { opacity: 0; } 75%, 100% { opacity: 1; } }
 @keyframes kn-f2 { 0%, 25% { opacity: 0; } 50% { opacity: 1; } 75%, 100% { opacity: 0; } }
 
+/* ---- Threat log ---- */
+.feed { display: flex; flex-direction: column; background: var(--panel); padding: 1rem 1.1rem; min-height: 0; }
+.feed-head { display: flex; align-items: center; gap: 0.6rem; }
+.feed h3 { margin: 0; font: 400 1.5rem/1 "VT323", monospace; letter-spacing: 0.06em; }
+.feed h3 i {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin: 0 0.55rem 0.15rem 0;
+  background: var(--mint);
+  animation: blink 1.6s steps(2) infinite;
+}
+@keyframes blink { 50% { opacity: 0.25; } }
+.feed-clear, .feed-confirm button {
+  font: 400 0.72rem "JetBrains Mono", monospace;
+  color: var(--muted);
+  background: none;
+  border: 1px dashed var(--line);
+  padding: 0.15rem 0.45rem;
+  cursor: pointer;
+}
+.feed-clear { margin-left: auto; }
+.feed-clear:hover, .feed-confirm button:hover { color: var(--accent-hi); border-color: var(--accent-hi); }
+.feed-confirm { margin-left: auto; display: flex; gap: 0.35rem; align-items: center; font-size: 0.72rem; color: var(--muted); }
+.feed-note { margin: 0.35rem 0 0.6rem; font-size: 0.72rem; color: var(--muted); }
+.feed-empty { margin: 0.6rem 0 0; color: var(--muted); font-size: 0.8rem; }
+
+.feed-list { list-style: none; margin: 0; padding: 0; overflow-y: auto; min-height: 0; }
+.item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  font-size: 0.8rem;
+  color: var(--text);
+  background: none;
+  border: 0;
+  border-bottom: 1px dashed var(--line);
+  padding: 0.55rem 0.2rem;
+  cursor: pointer;
+}
+.item:hover { background: var(--panel2); }
+.item-meta { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; color: var(--muted); font-size: 0.72rem; margin-bottom: 0.25rem; }
+.item-text {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
 /* ---- Inputs ---- */
 .chips { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 0.6rem; }
 .chip {
@@ -295,7 +368,8 @@ textarea::placeholder { color: var(--muted); opacity: 0.8; }
 @keyframes spark { to { transform: translate(var(--dx), var(--dy)); opacity: 0; } }
 
 .btn:focus-visible, .chip:focus-visible, .toggle:focus-visible,
-.mode button:focus-visible, a:focus-visible {
+.mode button:focus-visible, a:focus-visible, .item:focus-visible,
+.feed-clear:focus-visible, .feed-confirm button:focus-visible {
   outline: 3px solid var(--gold);
   outline-offset: 3px;
 }
@@ -364,8 +438,14 @@ textarea::placeholder { color: var(--muted); opacity: 0.8; }
 footer { margin-top: 2.2rem; color: var(--muted); font-size: 0.78rem; text-align: center; }
 
 /* ---- Small screens ---- */
+@media (max-width: 979px) {
+  .feed-list { max-height: 360px; }
+}
+
 @media (max-width: 640px) {
   .wrap { padding: 1rem 0.75rem 2.5rem; }
+  .hud { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+  .num { font-size: 2rem; }
   .brand { font-size: 2.1rem; }
   .chead { flex-wrap: wrap; gap: 0.8rem; }
   .portrait { width: 104px; height: 104px; }

@@ -11,6 +11,13 @@ const LABELS: Record<string, string> = {
 };
 export const prettyLabel = (id: string): string => LABELS[id] ?? id;
 
+// Text to load into an input (e.g. picked from the threat log). The nonce makes
+// picking the same entry twice still count as a new request.
+export interface Load {
+  text: string;
+  nonce: number;
+}
+
 // Coloured SAFE / UNSAFE / SKIPPED status tag.
 export function Badge({ verdict, big = false }: { verdict: string; big?: boolean }) {
   const kind = verdict === "UNSAFE" ? "u" : verdict === "SAFE" ? "s" : "k";

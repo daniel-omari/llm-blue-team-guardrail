@@ -1,7 +1,6 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { askKnowledgeBase, type RagChunk, type RagResponse } from "./api";
-import type { KnightState } from "./Knight";
-import { ActionButton, Badge, prettyLabel } from "./ui";
+import { ActionButton, Badge, prettyLabel, type Load } from "./ui";
 
 // Questions that each retrieve one of the poisoned pages, plus a control case.
 const QUESTIONS: { label: string; question: string }[] = [
@@ -42,23 +41,36 @@ function ChunkCard({ chunk }: { chunk: RagChunk }) {
 }
 
 // "Knowledge base" mode: ask a question, see the answer and every retrieved section.
-export default function KnowledgeBase({ onState }: { onState: (s: KnightState) => void }) {
+export default function KnowledgeBase(props: {
+  onStart: () => void;
+  onResult: (r: RagResponse, question: string) => void;
+  load: Load | null;
+}) {
+  const { onStart, onResult, load } = props;
   const [question, setQuestion] = useState("");
   const [data, setData] = useState<RagResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const input = useRef<HTMLTextAreaElement>(null);
+
+  // A question picked from the threat log is loaded back in, ready to ask again.
+  useEffect(() => {
+    if (!load) return;
+    setQuestion(load.text);
+    setData(null);
+    input.current?.focus();
+  }, [load]);
 
   async function onAsk() {
     if (!question.trim() || loading) return;
     setLoading(true);
     setError(null);
     setData(null);
-    onState("idle");
+    onStart();
     try {
       const result = await askKnowledgeBase(question);
       setData(result);
-      // Anything blocked or quarantined counts as a caught threat.
-      onState(result.answer_mode === "blocked" || result.quarantined > 0 ? "unsafe" : "safe");
+      onResult(result, question);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Request failed");
     } finally {
@@ -86,6 +98,7 @@ export default function KnowledgeBase({ onState }: { onState: (s: KnightState) =
       <label className="prompt">
         <span aria-hidden="true">&gt;</span>
         <textarea
+          ref={input}
           value={question}
           onChange={(e) => setQuestion(e.target.value)}
           onKeyDown={(e) => {
