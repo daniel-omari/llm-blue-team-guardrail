@@ -247,6 +247,9 @@ demo returns the clean passages instead of a generated answer.
 | `LLM_BASE_URL`         | the provider's official API  | e.g. `https://api.groq.com/openai/v1`             |
 | `LLM_MODEL`            | `claude-haiku-4-5-20251001`  | Model name at that provider                        |
 | `LLM_REASONING_EFFORT` | none                         | e.g. `low` for reasoning models                    |
+| `LLM_TEMPERATURE`      | provider default             | Sampling temperature for model calls               |
+| `LLM_STRUCTURED_OUTPUT`| `true`                       | Schema-constrained JSON from the judge (OpenAI-style APIs) |
+| `JUDGE_FAILURE_MODE`   | `open`                       | `closed` blocks when a configured judge is unreachable |
 | `DATABASE_URL`         | `sqlite:///./guardrail.db`   | Postgres URL switches logging and RAG to Postgres  |
 | `ADMIN_TOKEN`          | none (history off)           | Bearer token that enables the admin-only `/history` |
 | `RAG_VECTOR_STORE`     | `auto`                       | `auto`, `memory` or `pgvector`                     |

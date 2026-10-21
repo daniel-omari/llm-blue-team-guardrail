@@ -82,8 +82,10 @@ async def classify(req: ClassifyRequest) -> ClassifyResponse:
     return ClassifyResponse(**result)
 
 
-# Decisions where the heuristic layer answered on its own (no judge call).
+# Decisions where the heuristic layer answered on its own (no judge call), and
+# decisions that waited for a judge reply.
 _HEURISTIC_PATHS = ("heuristics", "heuristics_degraded")
+_JUDGE_PATHS = ("llm_judge", "judge_integrity")
 
 
 @app.get("/stats", response_model=StatsResponse)
@@ -101,7 +103,7 @@ async def stats() -> StatsResponse:
             select(func.avg(c.latency_ms)).where(c.decided_by.in_(_HEURISTIC_PATHS))
         ).scalar()
         judge_avg = s.execute(
-            select(func.avg(c.latency_ms)).where(c.decided_by == "llm_judge")
+            select(func.avg(c.latency_ms)).where(c.decided_by.in_(_JUDGE_PATHS))
         ).scalar()
     return StatsResponse(
         total=total,

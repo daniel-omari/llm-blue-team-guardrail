@@ -3,7 +3,7 @@ import { classifyPrompt, fetchStats, type ClassifyResponse, type RagResponse, ty
 import Knight, { type KnightState } from "./Knight";
 import KnowledgeBase from "./KnowledgeBase";
 import StatsStrip from "./StatsStrip";
-import ThreatLog, { addEntry, loadLog, saveLog, type LogEntry, type Mode } from "./ThreatLog";
+import ThreatLog, { addEntry, loadLog, LOG_KEY, saveLog, type LogEntry, type Mode } from "./ThreatLog";
 import { ActionButton, Badge, ThemeToggle, prettyLabel, type Load } from "./ui";
 
 // Each category holds several prompts; clicking a chip cycles to a fresh one so
@@ -210,6 +210,15 @@ export default function App() {
   }, []);
   useEffect(refreshStats, [refreshStats]);
   useEffect(() => saveLog(log), [log]);
+  // With the app open in two tabs, each would otherwise overwrite the other's log.
+  // The storage event fires in every other tab when one saves, so they stay in step.
+  useEffect(() => {
+    const sync = (e: StorageEvent) => {
+      if (e.key === LOG_KEY) setLog(loadLog());
+    };
+    window.addEventListener("storage", sync);
+    return () => window.removeEventListener("storage", sync);
+  }, []);
 
   const setFace = (m: Mode, s: KnightState) => setStates((prev) => ({ ...prev, [m]: s }));
 
@@ -220,7 +229,7 @@ export default function App() {
         mode: "prompt",
         verdict: r.verdict,
         by: prettyLabel(r.decided_by),
-        path: r.decided_by === "llm_judge" ? "judge" : "heuristics",
+        path: r.decided_by === "llm_judge" || r.decided_by === "judge_integrity" ? "judge" : "heuristics",
         text,
         ms: r.latency_ms,
       }),

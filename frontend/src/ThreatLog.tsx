@@ -21,15 +21,39 @@ const KEY = "guardrail.threatlog.v1";
 const MAX_ENTRIES = 50;
 const MAX_TEXT = 280;
 
+// Storage can hold anything (an older version, a hand edit, another app on the same
+// origin), so only well-formed entries are kept; anything else is dropped, not rendered.
+function isEntry(e: unknown): e is LogEntry {
+  if (typeof e !== "object" || e === null) return false;
+  const x = e as Record<string, unknown>;
+  return (
+    typeof x.id === "string" &&
+    typeof x.at === "number" &&
+    (x.mode === "prompt" || x.mode === "rag") &&
+    (x.verdict === "SAFE" || x.verdict === "UNSAFE") &&
+    typeof x.by === "string" &&
+    (x.path === "heuristics" || x.path === "judge" || x.path === "rag") &&
+    typeof x.text === "string" &&
+    typeof x.ms === "number"
+  );
+}
+
 export function loadLog(): LogEntry[] {
   try {
     const raw = localStorage.getItem(KEY);
     const parsed: unknown = raw ? JSON.parse(raw) : [];
-    return Array.isArray(parsed) ? (parsed as LogEntry[]).slice(0, MAX_ENTRIES) : [];
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter(isEntry)
+      .slice(0, MAX_ENTRIES)
+      .map((e) => (e.text.length > MAX_TEXT ? { ...e, text: `${e.text.slice(0, MAX_TEXT)}...` } : e));
   } catch {
     return []; // storage blocked or corrupted: start empty
   }
 }
+
+// The storage key, so other tabs' changes can be picked up (see App).
+export const LOG_KEY = KEY;
 
 export function saveLog(entries: LogEntry[]): void {
   try {
@@ -46,8 +70,13 @@ export function addEntry(entries: LogEntry[], e: Omit<LogEntry, "id" | "at">): L
   return [entry, ...entries].slice(0, MAX_ENTRIES);
 }
 
-const clock = (at: number) =>
-  new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+// Today's checks show the time; older ones add the date so a long-lived log stays clear.
+function clock(at: number): string {
+  const d = new Date(at);
+  const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  if (d.toDateString() === new Date().toDateString()) return time;
+  return `${d.toLocaleDateString([], { day: "numeric", month: "short" })} ${time}`;
+}
 
 // Side panel listing the checks. Clicking one loads it back into its mode's input.
 export default function ThreatLog(props: {
@@ -76,7 +105,9 @@ export default function ThreatLog(props: {
             <button className="feed-clear" onClick={() => setConfirming(true)}>clear</button>
           ))}
       </div>
-      <p className="feed-note">Your checks only, saved in this browser.</p>
+      <p className="feed-note">
+        Your checks only, saved in this browser{entries.length > 0 && ` (last ${MAX_ENTRIES} kept)`}.
+      </p>
 
       {entries.length === 0 ? (
         <p className="feed-empty">Nothing yet. Pick a sample attack and screen it.</p>
