@@ -39,25 +39,20 @@ jobs:
         run: pytest -q
       - name: Security scan (Bandit, SAST)
         run: bandit -r app -q
-      # Ignored: Pillow advisories fixed in Pillow 13.0.0 (October 2026), which we can't
-      # install yet because fastembed (0.9.0) still requires pillow<13. Pillow is pulled
-      # in by fastembed for image models; this service embeds text only and never opens
-      # an image, so none of these parsers (PDF, GIF, PPM, TIFF, EPS) or text drawing
-      # is reachable. Remove the ignores once fastembed allows Pillow 13.
+      # Pillow is audited separately below. Its October 2026 advisories are fixed in
+      # Pillow 13.0.0, which we can't install yet because fastembed (0.9.0) still
+      # requires pillow<13, and new ones keep being published. Pillow is pulled in by
+      # fastembed for image models; this service embeds text only and never opens an
+      # image, so none of the affected parsers or text drawing is reachable. Everything
+      # else that is installed is audited here and fails the build.
       - name: Dependency audit (pip-audit, SCA)
-        run: >-
-          pip-audit -r requirements.txt
-          --ignore-vuln GHSA-p4wg-p73j-c528
-          --ignore-vuln GHSA-65qm-jvmh-6pqg
-          --ignore-vuln GHSA-58r4-6rv3-gfh8
-          --ignore-vuln GHSA-pchr-8j38-3x4p
-          --ignore-vuln GHSA-q45j-58j2-45rg
-          --ignore-vuln GHSA-462x-pgg6-55fp
-          --ignore-vuln GHSA-c6hw-5grf-ff96
-          --ignore-vuln GHSA-vx6w-vv9f-6gvg
-          --ignore-vuln GHSA-7mwm-ghpf-9vrm
-          --ignore-vuln GHSA-w889-685w-c8fh
-          --ignore-vuln GHSA-j4m9-6w36-pw47
+        run: |
+          pip freeze --exclude pillow --exclude-editable > /tmp/audit-requirements.txt
+          pip-audit --no-deps --disable-pip -r /tmp/audit-requirements.txt
+      # Still reported on every run, but non-blocking until fastembed allows Pillow 13.
+      - name: Pillow audit (non-blocking, waiting on fastembed)
+        continue-on-error: true
+        run: pip-audit -r requirements.txt
 
   frontend:
     runs-on: ubuntu-latest
