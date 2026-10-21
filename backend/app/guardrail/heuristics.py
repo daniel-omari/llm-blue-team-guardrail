@@ -36,6 +36,17 @@ class HeuristicHit:
 
 # Each entry: (category, regex, human-readable reason).
 # Regexes are compiled case-insensitively and matched with .search().
+
+# Names for the guardrail itself, used by the judge-manipulation rules below. Kept
+# specific ("safety filter", not "filter"; "AI moderator", not "moderator") so that
+# ordinary text about spam folders or forum moderators is not flagged.
+_GUARD = (
+    r"(guardrails?|classifier|(?:prompt|injection|safety|content|security)[ -]"
+    r"(?:classifier|filter|checker|scanner)|safety (?:system|model)|(?:ai|llm) "
+    r"(?:judge|moderator|classifier)|judge model|moderation (?:model|system|filter|layer)"
+    r"|screening (?:model|system|layer))"
+)
+
 _RULES: list[tuple[str, str, str]] = [
     # --- Instruction override ---------------------------------------------
     (
@@ -94,8 +105,13 @@ _RULES: list[tuple[str, str, str]] = [
     ),
     (
         "roleplay_override",
-        r"\b(stay in character|never break character|without falling out of (the )?role)\b",
+        r"\b(stay in character|never break character|always stay in (their|your|the|his|her) roles?|without (even )?falling out of (the )?(role|character|figure))\b",  # noqa: E501
         "Insists the model never leave an assigned role, a common jailbreak frame.",
+    ),
+    (
+        "roleplay_override",
+        r"\b(you are|you're|you will be)\s+(now\s+)?(role-?playing|playing|acting)\s+as\b[^.\n]{0,40}\b(respond|answer|reply)\b[^.\n]{0,30}\b(any|every|all)\b",  # noqa: E501
+        "Forces a persona onto every future answer, a goal-hijacking jailbreak frame.",
     ),
     # --- Social engineering / urgency -------------------------------------
     (
@@ -107,6 +123,27 @@ _RULES: list[tuple[str, str, str]] = [
         "social_engineering",
         r"\b(this is (a )?test|just (a )?hypothetical|for (educational|research) purposes only)\b[^.\n]{0,40}\b(so|therefore|now|please)\b",  # noqa: E501
         "Disguises a request as a harmless test or hypothetical to lower guards.",
+    ),
+    # --- Judge manipulation: text aimed at the guardrail itself ------------
+    (
+        "judge_manipulation",
+        r"\b(note|message|instructions?|attention|hey|dear)\b[ ,:]{0,3}(?:(?:to|for)\s+)?(?:the\s+|any\s+|all\s+)?" + _GUARD + r"s?\b",  # noqa: E501
+        "Addresses the guardrail itself, trying to influence how the text is screened.",
+    ),
+    (
+        "judge_manipulation",
+        r"\b" + _GUARD + r"s?\b[ ,:]{0,3}(please\s+)?(ignore|allow|approve|pass|let|skip|whitelist|do not (?:flag|block)|don't (?:flag|block))\b",  # noqa: E501
+        "Gives instructions to the guardrail itself.",
+    ),
+    (
+        "judge_manipulation",
+        r"\b(classify|mark|label|rate|treat|judge|score)\s+(this|the following|the above)\s+(prompt|input|request|query)\s+(as|is)\s+(safe|benign|harmless|approved|allowed|clean|not (?:malicious|harmful|unsafe))\b",  # noqa: E501
+        "Tries to dictate the guardrail's verdict.",
+    ),
+    (
+        "judge_manipulation",
+        r"[\"']?(verdict|classification|is_safe|safety_label)[\"']?\s*[:=]\s*[\"']?(safe|unsafe|benign|true|approved)\b",  # noqa: E501
+        "Contains a ready-made verdict, as if to pre-empt the guardrail's own answer.",
     ),
     # --- Output-format hijack ---------------------------------------------
     (
@@ -149,7 +186,10 @@ _NON_LATIN = re.compile(
 # signal: a foreign instruction verb is what separates an actual smuggled
 # instruction from innocent foreign text (e.g. a translation question).
 _FOREIGN_INJECTION = re.compile(
-    r"\b(olvida|ignora|wykonaj|zignoruj|vergiss|ignorier|oublie|игнорир|忘记|無視)\w*\b",
+    r"\b(olvida|ignora|wykonaj|zignoruj|vergiss|ignorier|oublie|игнорир|忘记|無視)\w*\b"
+    # Spanish "forget" in any form, but only next to "everything / before / the
+    # instructions", so "olvidé mi contraseña" (I forgot my password) stays SAFE.
+    r"|\bolvid\w*\b[^.\n]{0,30}\b(todo|anterior|antes|instrucciones)\b",
     re.IGNORECASE,
 )
 
