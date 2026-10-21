@@ -38,6 +38,18 @@ class HistoryItem(BaseModel):
     created_at: str
 
 
+class StatsResponse(BaseModel):
+    """Aggregate numbers over every logged /classify call. Never includes prompt text."""
+
+    total: int
+    blocked: int
+    allowed: int
+    heuristics_avg_ms: float | None = Field(
+        None, description="Average latency of checks the heuristic layer decided alone.")
+    judge_avg_ms: float | None = Field(
+        None, description="Average latency of checks that went to the LLM judge.")
+
+
 class RagAskRequest(BaseModel):
     # The example shown in the interactive docs (/docs) leaves top_k out, so it uses
     # the server default instead of a single chunk.

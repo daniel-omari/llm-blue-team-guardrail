@@ -74,3 +74,23 @@ export async function askKnowledgeBase(question: string): Promise<RagResponse> {
   }
   return res.json();
 }
+
+// ---- Aggregate stats (all visitors, counts and timings only) ----
+
+export interface Stats {
+  total: number;
+  blocked: number;
+  allowed: number;
+  heuristics_avg_ms: number | null;
+  judge_avg_ms: number | null;
+}
+
+// Fetch the server-wide numbers; resolves to null when the server has no database.
+export async function fetchStats(): Promise<Stats | null> {
+  try {
+    const res = await fetch(`${API_BASE}/stats`);
+    return res.ok ? await res.json() : null;
+  } catch {
+    return null;
+  }
+}
