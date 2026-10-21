@@ -25,7 +25,8 @@ def enabled() -> bool:
     return bool(settings.llm_api_key)
 
 
-def _anthropic_request(system: str, user: str, max_tokens: int) -> tuple[str, dict, dict]:
+def _anthropic_request(system: str, user: str, max_tokens: int,
+                       json_schema: dict | None) -> tuple[str, dict, dict]:
     url = f"{settings.llm_endpoint}/v1/messages"
     headers = {
         "x-api-key": settings.llm_api_key or "",
@@ -38,10 +39,15 @@ def _anthropic_request(system: str, user: str, max_tokens: int) -> tuple[str, di
         "system": system,
         "messages": [{"role": "user", "content": user}],
     }
+    if settings.llm_temperature is not None:
+        payload["temperature"] = settings.llm_temperature
+    # The Messages API has no response_format here; the judge asks for JSON in its
+    # prompt instead and validates the reply strictly either way.
     return url, headers, payload
 
 
-def _openai_request(system: str, user: str, max_tokens: int) -> tuple[str, dict, dict]:
+def _openai_request(system: str, user: str, max_tokens: int,
+                    json_schema: dict | None) -> tuple[str, dict, dict]:
     url = f"{settings.llm_endpoint}/chat/completions"
     headers = {
         "authorization": f"Bearer {settings.llm_api_key}",
@@ -57,6 +63,14 @@ def _openai_request(system: str, user: str, max_tokens: int) -> tuple[str, dict,
     }
     if settings.llm_reasoning_effort:
         payload["reasoning_effort"] = settings.llm_reasoning_effort
+    if settings.llm_temperature is not None:
+        payload["temperature"] = settings.llm_temperature
+    if json_schema is not None and settings.llm_structured_output:
+        # Constrained decoding: the reply can only be JSON matching the schema.
+        payload["response_format"] = {
+            "type": "json_schema",
+            "json_schema": {"name": "verdict", "strict": True, "schema": json_schema},
+        }
     return url, headers, payload
 
 
@@ -73,14 +87,18 @@ def _openai_text(data: dict) -> str:
     return content
 
 
-async def complete(system: str, user: str, max_tokens: int = 400) -> str:
-    """Send one system + user message pair and return the model's text reply."""
+async def complete(system: str, user: str, max_tokens: int = 400,
+                   json_schema: dict | None = None) -> str:
+    """Send one system + user message pair and return the model's text reply.
+
+    ``json_schema`` asks providers that support it for schema-constrained JSON.
+    """
     if not enabled():
         raise LLMUnavailable("No LLM API key configured.")
 
     openai_style = settings.llm_provider == "openai"
     build = _openai_request if openai_style else _anthropic_request
-    url, headers, payload = build(system, user, max_tokens)
+    url, headers, payload = build(system, user, max_tokens, json_schema)
 
     try:
         async with httpx.AsyncClient(timeout=settings.llm_timeout_seconds) as client:

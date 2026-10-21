@@ -39,6 +39,19 @@ class Settings(BaseSettings):
     # Optional hint for reasoning models (e.g. "low" for gpt-oss on Groq), so they
     # answer quickly instead of thinking at length about a one-line verdict.
     llm_reasoning_effort: str | None = None
+    # Sampling temperature for every model call. None keeps the provider's default
+    # (OpenAI recommends 1.0 for gpt-oss); the benchmark's --repeat option measures
+    # how stable verdicts are at a given setting.
+    llm_temperature: float | None = None
+    # Ask OpenAI-compatible providers for schema-constrained JSON from the judge
+    # (response_format json_schema, strict). Turn off for a provider that rejects it.
+    llm_structured_output: bool = True
+
+    # What the guardrail does when the judge is needed but cannot be reached (outage,
+    # timeout, rate limit): "open" allows the text and flags the decision as degraded
+    # (the public demo), "closed" blocks it (what a production system should use).
+    # A judge reply that fails its integrity checks is always treated as UNSAFE.
+    judge_failure_mode: Literal["open", "closed"] = "open"
 
     # RAG demo: the local embedding model (downloaded once, then cached) and how
     # many chunks to retrieve per question.
