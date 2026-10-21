@@ -1,8 +1,8 @@
 ---
 title: LLM Blue-Team Guardrail
 emoji: 🛡️
-colorFrom: blue
-colorTo: indigo
+colorFrom: pink
+colorTo: purple
 sdk: docker
 license: mit
 app_port: 7860
@@ -26,7 +26,7 @@ TypeScript frontend, FastAPI backend, PostgreSQL with pgvector, Docker, CI).
 
 > **Live demo:** https://daniel-omari-llm-blue-team-guardrail.hf.space  
 > (free tier, so the first load after it has been idle takes a few seconds to wake).
-> Try the **Knowledge base** tab to watch poisoned documents get quarantined.
+> Switch to **Knowledge base** mode to watch poisoned documents get quarantined.
 
 ![Prompt Guardrail screening prompts for injection and jailbreak attempts](docs/demo.gif)
 
@@ -95,6 +95,34 @@ it, what each layer found, and the end-to-end latency:
   ]
 }
 ```
+
+## The interface
+
+The UI is a small security console with a night and a day theme.
+
+<p align="center">
+  <img src="docs/screenshot-night.png" width="49%" alt="Night theme: an injection attempt blocked, with the knight's eye burning red and the threat log beside the console">
+  <img src="docs/screenshot-day.png" width="49%" alt="Day theme: a safe prompt allowed, with the knight's eyes glowing green">
+</p>
+
+- **The guardian knight** (original pixel art made for this project) shows the latest
+  verdict: lilac eyes that glance around while idle, smiling green eyes when a prompt
+  is safe, and a burning red eye with a flame trail when a threat is blocked. It is an
+  inline SVG animated with CSS only, and it holds still for visitors who ask for
+  reduced motion.
+- **The threat log** lists your last 50 checks, prompts and knowledge-base questions,
+  with the verdict, the time and which layer decided. It lives only in your browser's
+  local storage: it is never sent anywhere or shown to anyone else, and one click
+  loads a check back in to run it again.
+- **The stats strip** shows how many prompts have been blocked and allowed across all
+  visitors, and the average time of each layer (heuristics in well under a
+  millisecond, the LLM judge in a few hundred). It reads `GET /stats`, which returns
+  counts and timings only, never prompt text.
+
+**Privacy.** The server logs each check so it can compute those numbers. The raw
+prompts can only be read through `GET /history`, which is admin-only: it does not
+exist unless an `ADMIN_TOKEN` is configured, and then requires it as a bearer token
+(compared in constant time). The public demo has no token set.
 
 ## Guarded RAG: stopping indirect prompt injection
 
@@ -287,12 +315,14 @@ project, and LLM-judge figures vary slightly between runs.
 
 Backend: Python, FastAPI, Pydantic, SQLAlchemy, PostgreSQL + pgvector, httpx,
 fastembed (ONNX embeddings), the MCP Python SDK.
-Frontend: React, TypeScript, Vite.
+Frontend: React, TypeScript, Vite, inline-SVG pixel art with CSS animation.
 Infrastructure: Docker, docker-compose, GitHub Actions (with a pgvector service
 container, Bandit, pip-audit), CodeQL, Dependabot, Hugging Face Spaces.
 
 ## Roadmap
 
+- Harden the LLM judge against text written to manipulate the judge itself (planned
+  for v0.4: data wrapping, strict output schema, canary check, fail-closed mode).
 - Rate limiting and API-key auth for the public API and MCP endpoints.
 - Larger public benchmarks for indirect injection (e.g. BIPIA) and jailbreaks.
 - Per-category policy thresholds, and an analytics dashboard over the logged checks.
