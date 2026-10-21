@@ -39,11 +39,11 @@ jobs:
         run: pytest -q
       - name: Security scan (Bandit, SAST)
         run: bandit -r app -q
-      # Ignored: Pillow advisories published in October 2026, fixed only in Pillow 13,
-      # which is not on PyPI yet (and fastembed still caps pillow<13). Pillow is pulled
+      # Ignored: Pillow advisories fixed in Pillow 13.0.0 (October 2026), which we can't
+      # install yet because fastembed (0.9.0) still requires pillow<13. Pillow is pulled
       # in by fastembed for image models; this service embeds text only and never opens
       # an image, so none of these parsers (PDF, GIF, PPM, TIFF, EPS) or text drawing
-      # is reachable. Remove the ignores once Pillow 13 can be installed.
+      # is reachable. Remove the ignores once fastembed allows Pillow 13.
       - name: Dependency audit (pip-audit, SCA)
         run: >-
           pip-audit -r requirements.txt
