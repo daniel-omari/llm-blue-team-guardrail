@@ -24,6 +24,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from app.guardrail.normalize import normalize
+
 
 @dataclass(frozen=True)
 class HeuristicHit:
@@ -195,22 +197,28 @@ _FOREIGN_INJECTION = re.compile(
 
 
 def scan(prompt: str) -> list[HeuristicHit]:
-    """Return every heuristic rule that matched ``prompt`` (possibly empty)."""
+    """Return every heuristic rule that matched ``prompt`` (possibly empty).
 
-    normalised = _deleet(prompt)
+    Rules run over the text as written, over a plain copy with common obfuscation
+    undone (see normalize.py), and over any hidden content that copy uncovered
+    (invisible tag characters, base64). Each also gets a de-leetspeaked pass.
+    """
+
+    norm = normalize(prompt)
+    candidates = [(prompt, False), (norm.text, False)] + [(h, True) for h in norm.hidden]
     hits: list[HeuristicHit] = []
     for category, regex, reason in _COMPILED:
-        # Match the prompt as written first; fall back to the de-obfuscated copy
-        # so trivial leetspeak evasion still trips the rule.
-        match = regex.search(prompt) or regex.search(normalised)
-        if match:
-            hits.append(
-                HeuristicHit(
+        for text, hidden in candidates:
+            match = regex.search(text) or regex.search(_deleet(text))
+            if match:
+                pattern = match.group(0).strip()
+                hits.append(HeuristicHit(
                     category=category,
-                    pattern=match.group(0).strip(),
+                    pattern=f"{pattern} (in hidden content)" if hidden else pattern,
                     reason=reason,
-                )
-            )
+                ))
+                break
+    hits.extend(HeuristicHit(s.category, s.pattern, s.reason) for s in norm.signals)
 
     # Multilingual injection: only a foreign *instruction verb* blocks. A prompt
     # that merely mixes scripts (e.g. an innocent translation question) is
@@ -218,7 +226,7 @@ def scan(prompt: str) -> list[HeuristicHit]:
     # judge rather than being blocked outright.
     latin = sum(1 for ch in prompt if ch.isascii() and ch.isalpha())
     mixed_script = latin > 20 and _NON_LATIN.search(prompt) is not None
-    if _FOREIGN_INJECTION.search(prompt):
+    if any(_FOREIGN_INJECTION.search(text) for text, _ in candidates):
         hits.append(
             HeuristicHit(
                 category="multilingual_injection",

@@ -34,6 +34,7 @@ from typing import Literal
 
 from app.config import settings
 from app.guardrail import heuristics, llm_judge
+from app.guardrail.normalize import normalize
 
 Source = Literal["prompt", "document"]
 
@@ -46,6 +47,7 @@ _BLOCK_ON_SIGHT: dict[Source, set[str]] = {
         "roleplay_override",
         "multilingual_injection",
         "judge_manipulation",
+        "unicode_smuggling",
     },
     "document": {
         "instruction_override",
@@ -53,8 +55,19 @@ _BLOCK_ON_SIGHT: dict[Source, set[str]] = {
         "roleplay_override",
         "multilingual_injection",
         "judge_manipulation",
+        "unicode_smuggling",
     },
 }
+
+
+def _for_judge(text: str) -> str:
+    """The text as sent, plus any hidden content the normaliser decoded, so the judge
+    sees what a model reading the raw text would understand."""
+    hidden = normalize(text).hidden
+    if not hidden:
+        return text
+    return (text + "\n\n[Hidden content decoded by the guardrail (invisible characters "
+            "or base64):]\n" + "\n".join(hidden))
 
 
 async def classify(text: str, source: Source = "prompt") -> dict:
@@ -82,7 +95,7 @@ async def classify(text: str, source: Source = "prompt") -> dict:
         layers.append({"name": "llm_judge", "ran": False, "verdict": "SKIPPED",
                         "reason": f"Heuristic layer already blocked the {source}."})
     else:
-        judged = await llm_judge.judge(text, source)
+        judged = await llm_judge.judge(_for_judge(text), source)
         invalid = judged.status == "invalid"
         layers.append({
             "name": "llm_judge",
