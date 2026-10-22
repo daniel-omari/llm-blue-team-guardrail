@@ -60,7 +60,8 @@ export interface RagChunk {
 export interface RagResponse {
   question: string;
   answer: string;
-  answer_mode: "llm" | "passages" | "no_context" | "blocked";
+  answer_mode: "llm" | "passages" | "no_context" | "blocked" | "withheld";
+  answer_issues: string[];
   question_screening: ClassifyResponse;
   chunks: RagChunk[];
   quarantined: number;

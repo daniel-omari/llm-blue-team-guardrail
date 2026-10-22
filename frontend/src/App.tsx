@@ -238,14 +238,19 @@ export default function App() {
   }
 
   function onRagResult(r: RagResponse, text: string) {
-    // Anything blocked or quarantined counts as a caught threat.
-    const caught = r.answer_mode === "blocked" || r.quarantined > 0;
+    // Anything blocked, quarantined or withheld counts as a caught threat.
+    const caught = r.answer_mode === "blocked" || r.answer_mode === "withheld" || r.quarantined > 0;
     setFace("rag", caught ? "unsafe" : "safe");
     setLog((prev) =>
       addEntry(prev, {
         mode: "rag",
         verdict: caught ? "UNSAFE" : "SAFE",
-        by: r.answer_mode === "blocked" ? "question blocked" : `${r.quarantined}/${r.chunks.length} quarantined`,
+        by:
+          r.answer_mode === "blocked"
+            ? "question blocked"
+            : r.answer_mode === "withheld"
+              ? "answer withheld"
+              : `${r.quarantined}/${r.chunks.length} quarantined`,
         path: "rag",
         text,
         ms: r.latency_ms,
