@@ -252,6 +252,10 @@ demo returns the clean passages instead of a generated answer.
 | `JUDGE_FAILURE_MODE`   | `open`                       | `closed` blocks when a configured judge is unreachable |
 | `DATABASE_URL`         | `sqlite:///./guardrail.db`   | Postgres URL switches logging and RAG to Postgres  |
 | `ADMIN_TOKEN`          | none (history off)           | Bearer token that enables the admin-only `/history` |
+| `LOG_RETENTION_DAYS`   | `30`                         | Logged checks are deleted after this many days (0 = keep) |
+| `RATE_LIMIT_PER_MINUTE` | `20`                        | Per-client limit on `/classify`, `/rag/ask`, `/mcp` (0 = off) |
+| `RATE_LIMIT_GLOBAL_PER_MINUTE` | `60`                 | Ceiling across all clients, protecting the LLM quota |
+| `TRUSTED_PROXY_HOPS`   | `0`                          | Reverse proxies in front of the app (reads X-Forwarded-For) |
 | `RAG_VECTOR_STORE`     | `auto`                       | `auto`, `memory` or `pgvector`                     |
 | `MCP_ALLOWED_HOSTS`    | `localhost:*,127.0.0.1:*`    | Host names the `/mcp` endpoint answers to          |
 
