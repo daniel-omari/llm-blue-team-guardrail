@@ -31,10 +31,18 @@ COPY backend/app ./app
 # Drop the built frontend where FastAPI's StaticFiles mount looks for it.
 COPY --from=frontend /frontend/dist ./app/static
 
+# Run as an unprivileged user (uid 1000, which Hugging Face Spaces also uses), so a
+# compromise of the app doesn't hand over root inside the container.
+RUN useradd --create-home --uid 1000 app
+USER app
+
 # Hugging Face Spaces serves on 7860; SQLite lives in writable /tmp. The MCP
 # endpoint (/mcp) only answers to these host names (DNS-rebinding protection).
 ENV PORT=7860
 ENV DATABASE_URL=sqlite:////tmp/guardrail.db
 ENV MCP_ALLOWED_HOSTS="localhost:*,127.0.0.1:*,daniel-omari-llm-blue-team-guardrail.hf.space"
+# Hugging Face's proxy adds the visitor's address to X-Forwarded-For; the rate limit
+# reads it from there instead of seeing every request come from the proxy.
+ENV TRUSTED_PROXY_HOPS=1
 EXPOSE 7860
 CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-7860}"]
