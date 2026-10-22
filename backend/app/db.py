@@ -9,13 +9,14 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from contextlib import contextmanager
+from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import Engine, create_engine
+from sqlalchemy import Engine, create_engine, delete
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.config import settings
-from app.models import Base
+from app.models import Base, Classification
 
 _engine: Engine | None = None
 _SessionLocal: sessionmaker[Session] | None = None
@@ -71,3 +72,17 @@ def session_scope() -> Iterator[Session | None]:
         raise
     finally:
         db.close()
+
+def purge_old_logs(days: int | None = None, now: datetime | None = None) -> int:
+    """Delete logged checks older than the retention period; return how many went.
+
+    Prompts are personal data as far as the person who typed them is concerned, so
+    they are kept no longer than ``LOG_RETENTION_DAYS`` (0 keeps them forever).
+    """
+    days = settings.log_retention_days if days is None else days
+    if _SessionLocal is None or days <= 0:
+        return 0
+    cutoff = (now or datetime.now(timezone.utc)) - timedelta(days=days)
+    with session_scope() as s:
+        result = s.execute(delete(Classification).where(Classification.created_at < cutoff))
+        return result.rowcount or 0

@@ -13,6 +13,9 @@ os.environ["DATABASE_URL"] = "sqlite://"
 os.environ["LLM_API_KEY"] = ""
 # TestClient sends "Host: testserver"; allow it on the MCP endpoint.
 os.environ["MCP_ALLOWED_HOSTS"] = "localhost:*,127.0.0.1:*,testserver"
+# The suite fires many requests from one client; rate limits get their own tests.
+os.environ["RATE_LIMIT_PER_MINUTE"] = "0"
+os.environ["RATE_LIMIT_GLOBAL_PER_MINUTE"] = "0"
 
 from app import db  # noqa: E402  (import after the env var is set)
 

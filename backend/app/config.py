@@ -24,6 +24,17 @@ class Settings(BaseSettings):
     # Unset (the default) switches /history off, so a public demo never exposes what
     # other visitors typed. Aggregate numbers are always available from /stats.
     admin_token: str | None = None
+    # Data minimisation: logged checks (prompt text included) are deleted after this
+    # many days. 0 keeps them forever.
+    log_retention_days: int = 30
+
+    # Rate limits for POST /classify, /rag/ask and /mcp (requests per minute; 0 turns
+    # a limit off): per client IP, and a global ceiling that protects the LLM quota.
+    rate_limit_per_minute: int = 20
+    rate_limit_global_per_minute: int = 60
+    # How many reverse proxies in front of the app append to X-Forwarded-For (the
+    # client IP is read that many entries from the right). 0 ignores the header.
+    trusted_proxy_hops: int = 0
 
     # Hosted LLM (the judge layer, and answers in the RAG demo). Two wire formats:
     #   "anthropic": the Anthropic Messages API (the default)
