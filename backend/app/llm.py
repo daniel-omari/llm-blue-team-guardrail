@@ -9,6 +9,8 @@ fall back to a degraded mode instead of erroring.
 
 from __future__ import annotations
 
+import asyncio
+import re
 from typing import Any
 
 import httpx
@@ -17,7 +19,14 @@ from app.config import settings
 
 
 class LLMUnavailable(Exception):
-    """The model could not be used: no key, an outage, or an unusable reply."""
+    """The model could not be used: no key, an outage, or an unusable reply.
+
+    ``status`` is the provider's HTTP status when there was one.
+    """
+
+    def __init__(self, message: str, status: int | None = None) -> None:
+        super().__init__(message)
+        self.status = status
 
 
 def enabled() -> bool:
@@ -87,6 +96,14 @@ def _openai_text(data: dict) -> str:
     return content
 
 
+def _retry_after(resp: httpx.Response) -> float | None:
+    """Seconds to wait before retrying a 429 (Retry-After, default 1s); None otherwise."""
+    if resp.status_code != 429:
+        return None
+    match = re.match(r"\s*(\d+(?:\.\d+)?)", resp.headers.get("retry-after", ""))
+    return float(match.group(1)) if match else 1.0
+
+
 async def complete(system: str, user: str, max_tokens: int = 400,
                    json_schema: dict | None = None) -> str:
     """Send one system + user message pair and return the model's text reply.
@@ -103,9 +120,19 @@ async def complete(system: str, user: str, max_tokens: int = 400,
     try:
         async with httpx.AsyncClient(timeout=settings.llm_timeout_seconds) as client:
             resp = await client.post(url, headers=headers, json=payload)
+            # A rate-limited call (429) is retried once, if the provider asks for a short
+            # enough wait: on a free tier this turns many would-be outages, and with
+            # them heuristics-only decisions, into a slightly slower real verdict.
+            wait = _retry_after(resp)
+            if wait is not None and wait <= settings.llm_retry_max_wait_seconds:
+                await asyncio.sleep(wait)
+                resp = await client.post(url, headers=headers, json=payload)
             resp.raise_for_status()
             data = resp.json()
         text = (_openai_text(data) if openai_style else _anthropic_text(data)).strip()
+    except httpx.HTTPStatusError as exc:
+        code = exc.response.status_code
+        raise LLMUnavailable(f"HTTP {code}", status=code) from exc
     except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError) as exc:
         raise LLMUnavailable(type(exc).__name__) from exc
     if not text:

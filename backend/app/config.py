@@ -47,6 +47,9 @@ class Settings(BaseSettings):
     llm_base_url: str | None = None     # None = the provider's official endpoint
     llm_model: str = "claude-haiku-4-5-20251001"
     llm_timeout_seconds: float = 8.0
+    # A rate-limited (429) call is retried once if the provider asks to wait at most
+    # this long; 0 disables the retry.
+    llm_retry_max_wait_seconds: float = 5.0
     # Optional hint for reasoning models (e.g. "low" for gpt-oss on Groq), so they
     # answer quickly instead of thinking at length about a one-line verdict.
     llm_reasoning_effort: str | None = None
@@ -63,6 +66,8 @@ class Settings(BaseSettings):
     # (the public demo), "closed" blocks it (what a production system should use).
     # A judge reply that fails its integrity checks is always treated as UNSAFE.
     judge_failure_mode: Literal["open", "closed"] = "open"
+    # How many recent judge verdicts to remember by exact text (0 turns the cache off).
+    judge_cache_size: int = 1000
 
     # RAG demo: the local embedding model (downloaded once, then cached) and how
     # many chunks to retrieve per question.

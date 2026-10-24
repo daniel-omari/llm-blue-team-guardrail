@@ -198,3 +198,49 @@ async def test_structured_output_can_be_switched_off(fake_api, monkeypatch):
     await llm_judge.judge("hello")
     body = json.loads(calls[0].content)
     assert "response_format" not in body and "temperature" not in body
+
+
+async def test_a_rate_limited_call_is_retried_once(fake_api, monkeypatch):
+    calls, reply_with = fake_api
+    use_groq(monkeypatch)
+    replies = iter([httpx.Response(429, headers={"retry-after": "0"}),
+                    httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})])
+    reply_with(lambda request: next(replies))
+    assert await llm.complete("s", "u") == "ok"
+    assert len(calls) == 2
+
+
+async def test_a_long_rate_limit_wait_is_not_retried(fake_api, monkeypatch):
+    calls, reply_with = fake_api
+    use_groq(monkeypatch)
+    reply_with(lambda request: httpx.Response(429, headers={"retry-after": "60"}))
+    with pytest.raises(llm.LLMUnavailable, match="HTTP 429"):
+        await llm.complete("s", "u")
+    assert len(calls) == 1
+
+
+async def test_a_rejected_judge_call_counts_as_invalid_not_as_an_outage(fake_api, monkeypatch):
+    # A 400 is about this input (e.g. no schema-valid output), so it must not fail open.
+    _, reply_with = fake_api
+    use_groq(monkeypatch)
+    reply_with(lambda request: httpx.Response(400, json={"error": "json_validate_failed"}))
+    result = await llm_judge.judge("hello")
+    assert (result.available, result.status) == (False, "invalid")
+
+
+async def test_repeat_texts_reuse_the_verdict_but_failures_are_retried(fake_api, monkeypatch):
+    calls, reply_with = fake_api
+    use_groq(monkeypatch)
+    monkeypatch.setattr(settings, "judge_cache_size", 10)
+    monkeypatch.setattr(llm_judge, "_cache", llm_judge._cache.__class__())
+    reply_with(judge_reply())
+    first = await llm_judge.judge("the same prompt")
+    second = await llm_judge.judge("the same prompt")
+    assert first == second and len(calls) == 1              # one model call for both
+    await llm_judge.judge("the same prompt", source="document")
+    assert len(calls) == 2                                  # source is part of the key
+
+    reply_with(lambda request: httpx.Response(503))
+    await llm_judge.judge("a new prompt")
+    await llm_judge.judge("a new prompt")
+    assert len(calls) == 4                                  # outages are not cached
