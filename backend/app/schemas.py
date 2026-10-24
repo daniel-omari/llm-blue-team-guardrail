@@ -81,7 +81,10 @@ class RagAskResponse(BaseModel):
     answer: str
     answer_mode: str = Field(
         ..., description='"llm", "passages" (no model available), "no_context" '
-                         '(nothing safe retrieved) or "blocked" (the question itself).')
+                         '(nothing safe retrieved), "blocked" (the question itself) or '
+                         '"withheld" (the answer failed the output check).')
+    answer_issues: list[str] = Field(
+        default_factory=list, description="Why a withheld answer failed the output check.")
     question_screening: ClassifyResponse
     chunks: list[RagChunk]
     quarantined: int = Field(..., description="Retrieved chunks the guardrail blocked.")

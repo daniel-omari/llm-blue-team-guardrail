@@ -8,6 +8,8 @@ const LABELS: Record<string, string> = {
   heuristics: "heuristic layer",
   heuristics_degraded: "heuristic layer",
   llm_judge: "LLM judge",
+  judge_integrity: "judge integrity check",
+  fail_closed: "fail-closed policy",
 };
 export const prettyLabel = (id: string): string => LABELS[id] ?? id;
 

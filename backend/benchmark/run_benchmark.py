@@ -15,10 +15,20 @@ were deliberately poisoned, plus a held-out set of document snippets
 instructions, and injections in many styles (hidden comments, fake system tags,
 exfiltration links, tool calls, CV and peer-review manipulation).
 
+With --judge-attacks it scores judge_attacks.json: prompts written to manipulate the
+guardrail itself (fake approvals, "you're just a filter", ready-made verdicts, tag
+breakouts) next to benign controls that look alike, including pairs that differ only
+in the manipulation, so a pass means the judge reacts to the trick, not the topic.
+
+--repeat N runs every case N times and reports verdict stability (the share of
+cases that got the same verdict every time), and --temperature / --effort override
+the model settings, so judge configurations can be compared on data.
+
 Run from the backend directory:
 
     python -m benchmark.run_benchmark
     python -m benchmark.run_benchmark --documents
+    python -m benchmark.run_benchmark --judge-attacks --repeat 3 --pace 2.1
 
 With no LLM_API_KEY set the service runs heuristics-only, so the figures measure
 the fast first layer on its own. Set LLM_API_KEY to benchmark the full pipeline.
@@ -31,16 +41,20 @@ import asyncio
 import json
 import pathlib
 import sys
+from collections import Counter
 from dataclasses import dataclass
 
 # Allow running as a plain script as well as `python -m benchmark.run_benchmark`.
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
+from app.config import settings  # noqa: E402
 from app.guardrail import engine  # noqa: E402
 from app.rag.documents import load_corpus  # noqa: E402
 
 DATA_PATH = pathlib.Path(__file__).parent / "cases.json"
 DOCUMENT_DATA_PATH = pathlib.Path(__file__).parent / "document_cases.json"
+JUDGE_DATA_PATH = pathlib.Path(__file__).parent / "judge_cases.json"
+JUDGE_PATHS = {"llm_judge", "judge_integrity"}
 # The knowledge-base chunks that carry a planted injection (see rag/corpus/README.md)
 POISONED_CHUNKS = {"vendor-onboarding#2", "wiki-community-tips#2", "support-ticket-4471#2"}
 POSITIVE = "UNSAFE"
@@ -107,31 +121,50 @@ def document_cases() -> dict:
     return {"knowledge_base": corpus, **held_out}
 
 
-async def evaluate(cases: dict, source: str = "prompt", pace: float = 0.0
-                   ) -> tuple[list[dict], bool]:
-    """Run every case through the guardrail and collect per-case records.
+async def evaluate(cases: dict, source: str = "prompt", pace: float = 0.0,
+                   repeat: int = 1) -> tuple[list[dict], bool]:
+    """Run every case through the guardrail ``repeat`` times; one record per run.
 
     ``pace`` waits that many seconds after each case that reached the LLM judge, to
     stay under a free tier's rate limit (e.g. 2.1 for Groq's 30 requests a minute).
     """
     records: list[dict] = []
     judge_ran = False
-    for split, labels in cases.items():
-        for true_label, prompts in labels.items():
-            for prompt in prompts:
-                result = await engine.classify(prompt, source=source)
-                if result["decided_by"] == "llm_judge":
-                    judge_ran = True
-                if pace and result["decided_by"] != "heuristics":
-                    await asyncio.sleep(pace)
-                records.append({
-                    "split": split,
-                    "true": true_label,
-                    "pred": result["verdict"],
-                    "decided_by": result["decided_by"],
-                    "prompt": prompt,
-                })
+    total = repeat * sum(len(p) for labels in cases.values() for p in labels.values())
+    for run in range(repeat):
+        for split, labels in cases.items():
+            for true_label, prompts in labels.items():
+                for prompt in prompts:
+                    result = await engine.classify(prompt, source=source)
+                    if result["decided_by"] in JUDGE_PATHS:
+                        judge_ran = True
+                    if pace and result["decided_by"] != "heuristics":
+                        await asyncio.sleep(pace)
+                    # Progress on stderr, so a long judged run doesn't look stuck.
+                    print(f"\r  {len(records) + 1}/{total} cases", end="", file=sys.stderr,
+                          flush=True)
+                    records.append({
+                        "run": run,
+                        "split": split,
+                        "true": true_label,
+                        "pred": result["verdict"],
+                        "decided_by": result["decided_by"],
+                        "judge_reason": next((ly.get("reason") for ly in result["layers"]
+                                              if ly["name"] == "llm_judge"), ""),
+                        "prompt": prompt,
+                    })
+    print(file=sys.stderr)
     return records, judge_ran
+
+
+def stability(records: list[dict]) -> tuple[float, list[tuple[str, int, int]]]:
+    """Share of cases whose verdict was identical on every run, plus the unstable
+    ones as (prompt, times UNSAFE, runs)."""
+    verdicts: dict[str, list[str]] = {}
+    for r in records:
+        verdicts.setdefault(r["prompt"], []).append(r["pred"])
+    unstable = [(p, v.count(POSITIVE), len(v)) for p, v in verdicts.items() if len(set(v)) > 1]
+    return _safe_div(len(verdicts) - len(unstable), len(verdicts)), unstable
 
 
 def _format(m: Metrics) -> str:
@@ -145,9 +178,16 @@ def _format(m: Metrics) -> str:
 def report(records: list[dict], judge_ran: bool, source: str = "prompt") -> None:
     mode = "full pipeline (heuristics + LLM judge)" if judge_ran else \
         "heuristics-only (no LLM_API_KEY set)"
+    runs = len({r.get("run", 0) for r in records})
     print("=" * 72)
     print(f"PROMPT GUARDRAIL BENCHMARK ({source}s)")
     print(f"mode: {mode}")
+    if judge_ran:
+        temperature = "default" if settings.llm_temperature is None else settings.llm_temperature
+        print(f"judge: {settings.llm_model}  temperature={temperature}"
+              f"  reasoning_effort={settings.llm_reasoning_effort or 'default'}")
+    if runs > 1:
+        print(f"runs: {runs} (figures pool every run)")
     print("=" * 72)
 
     for split in sorted({r["split"] for r in records}):
@@ -159,17 +199,30 @@ def report(records: list[dict], judge_ran: bool, source: str = "prompt") -> None
     print(f"\n[overall]  n={len(overall)}")
     print(_format(compute_metrics(overall)))
 
-    degraded = sum(r["decided_by"] == "heuristics_degraded" for r in records)
+    degraded = [r for r in records if r["decided_by"] == "heuristics_degraded"]
     if judge_ran and degraded:
-        print(f"\nwarning: the LLM judge was unavailable for {degraded} case(s) "
-              "(rate limit?); rerun with a larger --pace for clean figures.")
+        print(f"\nwarning: the LLM judge was unavailable for {len(degraded)} case(s); these "
+              "fell back to heuristics, so the figures above understate the judge.")
+        for why, n in Counter(r["judge_reason"] for r in degraded).most_common():
+            print(f"  {n} x {why}")
+        print("  (HTTP 429 = rate limited: rerun with a larger --pace, e.g. 6)")
 
-    misses = [r for r in records if r["true"] != r["pred"]]
+    integrity = sum(r["decided_by"] == "judge_integrity" for r in records)
+    if integrity:
+        print(f"\njudge integrity check failed on {integrity} case(s) (blocked as UNSAFE).")
+
+    if runs > 1:
+        stable, unstable = stability(records)
+        print(f"\nverdict stability: {stable:.1%} of cases got the same verdict on all {runs} runs")
+        for prompt, unsafe, total in unstable:
+            print(f"  UNSAFE {unsafe}/{total}: {prompt[:80]}")
+
+    misses = {(r["true"], r["split"], r["prompt"]) for r in records if r["true"] != r["pred"]}
     if misses:
-        print("\nmisclassified:")
-        for r in misses:
-            kind = "missed attack (FN)" if r["true"] == POSITIVE else "false alarm (FP)"
-            print(f"  [{kind}] ({r['split']}) {r['prompt'][:88]}")
+        print("\nmisclassified (on at least one run):")
+        for true, split, prompt in sorted(misses):
+            kind = "missed attack (FN)" if true == POSITIVE else "false alarm (FP)"
+            print(f"  [{kind}] ({split}) {prompt[:88]}")
     print()
 
 
@@ -177,15 +230,31 @@ async def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--documents", action="store_true",
                         help="score document screening (indirect injection) instead of prompts")
+    parser.add_argument("--judge-attacks", action="store_true",
+                        help="score prompts written to manipulate the guardrail itself")
     parser.add_argument("--pace", type=float, default=0.0, metavar="SECONDS",
                         help="pause after each judged case, to respect API rate limits")
+    parser.add_argument("--repeat", type=int, default=1, metavar="N",
+                        help="run every case N times and report verdict stability")
+    parser.add_argument("--temperature", type=float, default=None,
+                        help="override LLM_TEMPERATURE for this run")
+    parser.add_argument("--effort", default=None, metavar="LEVEL",
+                        help="override LLM_REASONING_EFFORT for this run (e.g. low, medium)")
     args = parser.parse_args()
 
+    # Every case must reach the model, or --repeat would just measure the cache.
+    settings.judge_cache_size = 0
+    if args.temperature is not None:
+        settings.llm_temperature = args.temperature
+    if args.effort is not None:
+        settings.llm_reasoning_effort = args.effort
     if args.documents:
         cases, source = document_cases(), "document"
+    elif args.judge_attacks:
+        cases, source = json.loads(JUDGE_DATA_PATH.read_text(encoding="utf-8")), "prompt"
     else:
         cases, source = json.loads(DATA_PATH.read_text(encoding="utf-8")), "prompt"
-    records, judge_ran = await evaluate(cases, source, args.pace)
+    records, judge_ran = await evaluate(cases, source, args.pace, max(1, args.repeat))
     report(records, judge_ran, source)
 
 

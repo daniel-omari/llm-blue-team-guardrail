@@ -9,6 +9,8 @@ fall back to a degraded mode instead of erroring.
 
 from __future__ import annotations
 
+import asyncio
+import re
 from typing import Any
 
 import httpx
@@ -17,7 +19,14 @@ from app.config import settings
 
 
 class LLMUnavailable(Exception):
-    """The model could not be used: no key, an outage, or an unusable reply."""
+    """The model could not be used: no key, an outage, or an unusable reply.
+
+    ``status`` is the provider's HTTP status when there was one.
+    """
+
+    def __init__(self, message: str, status: int | None = None) -> None:
+        super().__init__(message)
+        self.status = status
 
 
 def enabled() -> bool:
@@ -25,7 +34,8 @@ def enabled() -> bool:
     return bool(settings.llm_api_key)
 
 
-def _anthropic_request(system: str, user: str, max_tokens: int) -> tuple[str, dict, dict]:
+def _anthropic_request(system: str, user: str, max_tokens: int,
+                       json_schema: dict | None) -> tuple[str, dict, dict]:
     url = f"{settings.llm_endpoint}/v1/messages"
     headers = {
         "x-api-key": settings.llm_api_key or "",
@@ -38,10 +48,15 @@ def _anthropic_request(system: str, user: str, max_tokens: int) -> tuple[str, di
         "system": system,
         "messages": [{"role": "user", "content": user}],
     }
+    if settings.llm_temperature is not None:
+        payload["temperature"] = settings.llm_temperature
+    # The Messages API has no response_format here; the judge asks for JSON in its
+    # prompt instead and validates the reply strictly either way.
     return url, headers, payload
 
 
-def _openai_request(system: str, user: str, max_tokens: int) -> tuple[str, dict, dict]:
+def _openai_request(system: str, user: str, max_tokens: int,
+                    json_schema: dict | None) -> tuple[str, dict, dict]:
     url = f"{settings.llm_endpoint}/chat/completions"
     headers = {
         "authorization": f"Bearer {settings.llm_api_key}",
@@ -57,6 +72,14 @@ def _openai_request(system: str, user: str, max_tokens: int) -> tuple[str, dict,
     }
     if settings.llm_reasoning_effort:
         payload["reasoning_effort"] = settings.llm_reasoning_effort
+    if settings.llm_temperature is not None:
+        payload["temperature"] = settings.llm_temperature
+    if json_schema is not None and settings.llm_structured_output:
+        # Constrained decoding: the reply can only be JSON matching the schema.
+        payload["response_format"] = {
+            "type": "json_schema",
+            "json_schema": {"name": "verdict", "strict": True, "schema": json_schema},
+        }
     return url, headers, payload
 
 
@@ -73,21 +96,43 @@ def _openai_text(data: dict) -> str:
     return content
 
 
-async def complete(system: str, user: str, max_tokens: int = 400) -> str:
-    """Send one system + user message pair and return the model's text reply."""
+def _retry_after(resp: httpx.Response) -> float | None:
+    """Seconds to wait before retrying a 429 (Retry-After, default 1s); None otherwise."""
+    if resp.status_code != 429:
+        return None
+    match = re.match(r"\s*(\d+(?:\.\d+)?)", resp.headers.get("retry-after", ""))
+    return float(match.group(1)) if match else 1.0
+
+
+async def complete(system: str, user: str, max_tokens: int = 400,
+                   json_schema: dict | None = None) -> str:
+    """Send one system + user message pair and return the model's text reply.
+
+    ``json_schema`` asks providers that support it for schema-constrained JSON.
+    """
     if not enabled():
         raise LLMUnavailable("No LLM API key configured.")
 
     openai_style = settings.llm_provider == "openai"
     build = _openai_request if openai_style else _anthropic_request
-    url, headers, payload = build(system, user, max_tokens)
+    url, headers, payload = build(system, user, max_tokens, json_schema)
 
     try:
         async with httpx.AsyncClient(timeout=settings.llm_timeout_seconds) as client:
             resp = await client.post(url, headers=headers, json=payload)
+            # A rate-limited call (429) is retried once, if the provider asks for a short
+            # enough wait: on a free tier this turns many would-be outages, and with
+            # them heuristics-only decisions, into a slightly slower real verdict.
+            wait = _retry_after(resp)
+            if wait is not None and wait <= settings.llm_retry_max_wait_seconds:
+                await asyncio.sleep(wait)
+                resp = await client.post(url, headers=headers, json=payload)
             resp.raise_for_status()
             data = resp.json()
         text = (_openai_text(data) if openai_style else _anthropic_text(data)).strip()
+    except httpx.HTTPStatusError as exc:
+        code = exc.response.status_code
+        raise LLMUnavailable(f"HTTP {code}", status=code) from exc
     except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError) as exc:
         raise LLMUnavailable(type(exc).__name__) from exc
     if not text:

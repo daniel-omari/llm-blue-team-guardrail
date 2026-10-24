@@ -29,11 +29,17 @@ export async function classifyPrompt(prompt: string): Promise<ClassifyResponse> 
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ prompt }),
   });
-  if (!res.ok) {
-    const detail = await res.text();
-    throw new Error(`API error ${res.status}: ${detail}`);
-  }
+  if (!res.ok) throw new Error(await errorMessage(res));
   return res.json();
+}
+
+// A readable error: the rate limit gets a plain sentence, anything else the status.
+async function errorMessage(res: Response): Promise<string> {
+  if (res.status === 429) {
+    const wait = res.headers.get("Retry-After");
+    return `Slow down a little: too many checks in a short time. Try again in ${wait ?? "a few"} seconds.`;
+  }
+  return `API error ${res.status}: ${await res.text()}`;
 }
 
 // ---- Knowledge base (guarded RAG) ----
@@ -54,7 +60,8 @@ export interface RagChunk {
 export interface RagResponse {
   question: string;
   answer: string;
-  answer_mode: "llm" | "passages" | "no_context" | "blocked";
+  answer_mode: "llm" | "passages" | "no_context" | "blocked" | "withheld";
+  answer_issues: string[];
   question_screening: ClassifyResponse;
   chunks: RagChunk[];
   quarantined: number;
@@ -68,10 +75,7 @@ export async function askKnowledgeBase(question: string): Promise<RagResponse> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ question }),
   });
-  if (!res.ok) {
-    const detail = await res.text();
-    throw new Error(`API error ${res.status}: ${detail}`);
-  }
+  if (!res.ok) throw new Error(await errorMessage(res));
   return res.json();
 }
 

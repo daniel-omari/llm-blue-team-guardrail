@@ -12,9 +12,14 @@ RUN pip install --no-cache-dir -r requirements.txt
 ENV RAG_EMBEDDING_MODEL=BAAI/bge-small-en-v1.5 \
     RAG_MODEL_CACHE_DIR=/app/models
 RUN python -c "import os; from fastembed import TextEmbedding; \
-TextEmbedding(os.environ['RAG_EMBEDDING_MODEL'], cache_dir=os.environ['RAG_MODEL_CACHE_DIR'])"
+TextEmbedding(os.environ['RAG_EMBEDDING_MODEL'], cache_dir=os.environ['RAG_MODEL_CACHE_DIR'])" \
+    && chmod -R a+rwX /app/models
 
 COPY app ./app
+
+# Run as an unprivileged user, so a compromise of the app doesn't hand over root.
+RUN useradd --create-home --uid 1000 app
+USER app
 
 EXPOSE 8000
 # Honour the platform-provided $PORT (Render/Fly/Railway) and default to 8000.

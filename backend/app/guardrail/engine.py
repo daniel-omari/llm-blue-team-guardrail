@@ -6,9 +6,14 @@ Decision policy (defence in depth):
 2. If heuristics find a high-confidence injection signature, the prompt is
    UNSAFE and we short-circuit, so no model call is needed.
 3. Otherwise escalate to the LLM judge for the ambiguous middle ground.
-4. If the judge is unavailable (no key / outage), fall back to "heuristics say
-   nothing, so treat as SAFE", but the response records that it was a
-   degraded, heuristics-only decision so the caller knows.
+4. If the judge replies but the reply fails its integrity checks (malformed, off
+   schema, wrong canary), the text is UNSAFE: an attacker must not be able to turn
+   a confused judge into an "allow". Decided by ``judge_integrity``.
+5. If no judge is configured, fall back to "heuristics say nothing, so treat as
+   SAFE", recorded as a degraded, heuristics-only decision (``heuristics_degraded``).
+6. If a configured judge cannot be reached (outage, timeout, rate limit), follow
+   ``JUDGE_FAILURE_MODE``: "open" behaves like 5, "closed" blocks the text
+   (``fail_closed``).
 
 The response is fully explainable: it reports the final verdict, which layers
 ran, what each found, and the end-to-end latency.
@@ -27,7 +32,9 @@ import time
 from dataclasses import asdict
 from typing import Literal
 
+from app.config import settings
 from app.guardrail import heuristics, llm_judge
+from app.guardrail.normalize import normalize
 
 Source = Literal["prompt", "document"]
 
@@ -39,14 +46,28 @@ _BLOCK_ON_SIGHT: dict[Source, set[str]] = {
         "secret_extraction",
         "roleplay_override",
         "multilingual_injection",
+        "judge_manipulation",
+        "unicode_smuggling",
     },
     "document": {
         "instruction_override",
         "prompt_extraction",
         "roleplay_override",
         "multilingual_injection",
+        "judge_manipulation",
+        "unicode_smuggling",
     },
 }
+
+
+def _for_judge(text: str) -> str:
+    """The text as sent, plus any hidden content the normaliser decoded, so the judge
+    sees what a model reading the raw text would understand."""
+    hidden = normalize(text).hidden
+    if not hidden:
+        return text
+    return (text + "\n\n[Hidden content decoded by the guardrail (invisible characters "
+            "or base64):]\n" + "\n".join(hidden))
 
 
 async def classify(text: str, source: Source = "prompt") -> dict:
@@ -74,11 +95,12 @@ async def classify(text: str, source: Source = "prompt") -> dict:
         layers.append({"name": "llm_judge", "ran": False, "verdict": "SKIPPED",
                         "reason": f"Heuristic layer already blocked the {source}."})
     else:
-        judged = await llm_judge.judge(text, source)
+        judged = await llm_judge.judge(_for_judge(text), source)
+        invalid = judged.status == "invalid"
         layers.append({
             "name": "llm_judge",
-            "ran": judged.available,
-            "verdict": judged.verdict,
+            "ran": judged.available or invalid,     # an invalid reply still means it ran
+            "verdict": "INVALID" if invalid else judged.verdict,
             "confidence": judged.confidence,
             "reason": judged.reason,
         })
@@ -87,6 +109,17 @@ async def classify(text: str, source: Source = "prompt") -> dict:
             confidence = judged.confidence
             reason = judged.reason
             decided_by = "llm_judge"
+        elif judged.status == "invalid":
+            verdict = "UNSAFE"
+            confidence = 0.8
+            reason = ("The judge's reply failed its integrity check, a sign the text "
+                      "may be trying to manipulate the judge.")
+            decided_by = "judge_integrity"
+        elif judged.status == "unavailable" and settings.judge_failure_mode == "closed":
+            verdict = "UNSAFE"
+            confidence = 0.5
+            reason = "The LLM judge could not be reached, so the text was blocked (fail-closed)."
+            decided_by = "fail_closed"
         else:
             # Degraded mode: nothing tripped the heuristics and we cannot reach
             # the model, so we allow the prompt but flag the degradation.

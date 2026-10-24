@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 import secrets
+import time
 from contextlib import asynccontextmanager
 from typing import Annotated
 
@@ -17,8 +18,10 @@ from sqlalchemy import case, func, select
 from app import db, mcp_server
 from app.config import settings
 from app.guardrail import engine
+from app.headers import SecurityHeadersMiddleware
 from app.models import Classification
 from app.rag import pipeline as rag
+from app.ratelimit import RateLimitMiddleware
 from app.schemas import (
     ClassifyRequest,
     ClassifyResponse,
@@ -36,13 +39,14 @@ _mcp_http = mcp_server.http_app()
 async def lifespan(_: FastAPI):
     """Initialise the database (if one is configured) and run the MCP session manager."""
     db.init_db()
+    db.purge_old_logs()
     async with mcp_server.server.session_manager.run():
         yield
 
 
 app = FastAPI(
     title="Prompt Guardrail",
-    version="0.3.0",
+    version="0.4.0",
     summary=(
         "A layered guardrail that screens prompts and retrieved documents for injection,"
         " with a guarded RAG demo and an MCP server for AI agents."
@@ -56,6 +60,13 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(RateLimitMiddleware)
+# Added last, so it is the outermost layer and also covers 429 and CORS responses.
+app.add_middleware(SecurityHeadersMiddleware)
+
+# Retention runs at startup and then at most hourly, piggybacking on /classify.
+_PURGE_EVERY_SECONDS = 3600
+_last_purge = time.monotonic()
 
 
 @app.get("/health")
@@ -67,6 +78,7 @@ async def health() -> dict:
 @app.post("/classify", response_model=ClassifyResponse)
 async def classify(req: ClassifyRequest) -> ClassifyResponse:
     """Screen a single prompt and best-effort log the verdict to the database."""
+    global _last_purge
     result = await engine.classify(req.prompt)
 
     with db.session_scope() as s:
@@ -78,12 +90,17 @@ async def classify(req: ClassifyRequest) -> ClassifyResponse:
                 confidence=result["confidence"],
                 latency_ms=result["latency_ms"],
             ))
+    if time.monotonic() - _last_purge > _PURGE_EVERY_SECONDS:
+        _last_purge = time.monotonic()
+        db.purge_old_logs()
 
     return ClassifyResponse(**result)
 
 
-# Decisions where the heuristic layer answered on its own (no judge call).
+# Decisions where the heuristic layer answered on its own (no judge call), and
+# decisions that waited for a judge reply.
 _HEURISTIC_PATHS = ("heuristics", "heuristics_degraded")
+_JUDGE_PATHS = ("llm_judge", "judge_integrity")
 
 
 @app.get("/stats", response_model=StatsResponse)
@@ -101,7 +118,7 @@ async def stats() -> StatsResponse:
             select(func.avg(c.latency_ms)).where(c.decided_by.in_(_HEURISTIC_PATHS))
         ).scalar()
         judge_avg = s.execute(
-            select(func.avg(c.latency_ms)).where(c.decided_by == "llm_judge")
+            select(func.avg(c.latency_ms)).where(c.decided_by.in_(_JUDGE_PATHS))
         ).scalar()
     return StatsResponse(
         total=total,

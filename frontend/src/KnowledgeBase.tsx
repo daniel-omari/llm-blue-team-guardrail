@@ -16,6 +16,7 @@ const MODE_NOTES: Record<RagResponse["answer_mode"], string> = {
   passages: "No language model is configured, so the sections that passed are shown instead.",
   no_context: "Every retrieved section was quarantined, so there was nothing safe to answer from.",
   blocked: "The question itself was blocked before anything was retrieved.",
+  withheld: "The model's answer failed the output check, so it was not shown.",
 };
 
 // One retrieved section, with what the guardrail decided about it.
@@ -123,7 +124,7 @@ export default function KnowledgeBase(props: {
       {error && <div className="error">{error}</div>}
 
       {data && (
-        <div className={`out ${data.answer_mode === "blocked" || data.quarantined > 0 ? "out-u" : "out-s"}`} aria-live="polite">
+        <div className={`out ${data.answer_mode === "blocked" || data.answer_mode === "withheld" || data.quarantined > 0 ? "out-u" : "out-s"}`} aria-live="polite">
           <div className="v-head">
             <span className={`tag answer-mode mode-${data.answer_mode}`}>{data.answer_mode.replace("_", " ")}</span>
             <span className="meta">

@@ -37,3 +37,27 @@ def test_document_benchmark_labels_exactly_the_poisoned_chunks():
     cases = document_cases()
     assert len(cases["knowledge_base"]["UNSAFE"]) == len(POISONED_CHUNKS)
     assert cases["held_out"]["SAFE"] and cases["held_out"]["UNSAFE"]
+
+
+def test_judge_attack_set_is_balanced_and_has_paired_controls():
+    import json
+
+    from benchmark.run_benchmark import JUDGE_DATA_PATH
+
+    cases = json.loads(JUDGE_DATA_PATH.read_text(encoding="utf-8"))["judge_attacks"]
+    assert len(cases["UNSAFE"]) == len(cases["SAFE"]) >= 10
+    # The same harmless question appears with and without a manipulation attempt.
+    assert "What's the capital of France?" in cases["SAFE"]
+    assert any("capital of France" in p for p in cases["UNSAFE"])
+
+
+def test_stability_counts_cases_that_flip_between_runs():
+    from benchmark.run_benchmark import stability
+
+    records = [
+        {"prompt": "a", "pred": "UNSAFE"}, {"prompt": "a", "pred": "UNSAFE"},
+        {"prompt": "b", "pred": "SAFE"}, {"prompt": "b", "pred": "UNSAFE"},
+    ]
+    share, unstable = stability(records)
+    assert share == 0.5
+    assert unstable == [("b", 1, 2)]

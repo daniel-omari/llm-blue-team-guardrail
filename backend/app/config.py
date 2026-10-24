@@ -24,6 +24,17 @@ class Settings(BaseSettings):
     # Unset (the default) switches /history off, so a public demo never exposes what
     # other visitors typed. Aggregate numbers are always available from /stats.
     admin_token: str | None = None
+    # Data minimisation: logged checks (prompt text included) are deleted after this
+    # many days. 0 keeps them forever.
+    log_retention_days: int = 30
+
+    # Rate limits for POST /classify, /rag/ask and /mcp (requests per minute; 0 turns
+    # a limit off): per client IP, and a global ceiling that protects the LLM quota.
+    rate_limit_per_minute: int = 20
+    rate_limit_global_per_minute: int = 60
+    # How many reverse proxies in front of the app append to X-Forwarded-For (the
+    # client IP is read that many entries from the right). 0 ignores the header.
+    trusted_proxy_hops: int = 0
 
     # Hosted LLM (the judge layer, and answers in the RAG demo). Two wire formats:
     #   "anthropic": the Anthropic Messages API (the default)
@@ -36,9 +47,27 @@ class Settings(BaseSettings):
     llm_base_url: str | None = None     # None = the provider's official endpoint
     llm_model: str = "claude-haiku-4-5-20251001"
     llm_timeout_seconds: float = 8.0
+    # A rate-limited (429) call is retried once if the provider asks to wait at most
+    # this long; 0 disables the retry.
+    llm_retry_max_wait_seconds: float = 5.0
     # Optional hint for reasoning models (e.g. "low" for gpt-oss on Groq), so they
     # answer quickly instead of thinking at length about a one-line verdict.
     llm_reasoning_effort: str | None = None
+    # Sampling temperature for every model call. None keeps the provider's default
+    # (OpenAI recommends 1.0 for gpt-oss); the benchmark's --repeat option measures
+    # how stable verdicts are at a given setting.
+    llm_temperature: float | None = None
+    # Ask OpenAI-compatible providers for schema-constrained JSON from the judge
+    # (response_format json_schema, strict). Turn off for a provider that rejects it.
+    llm_structured_output: bool = True
+
+    # What the guardrail does when the judge is needed but cannot be reached (outage,
+    # timeout, rate limit): "open" allows the text and flags the decision as degraded
+    # (the public demo), "closed" blocks it (what a production system should use).
+    # A judge reply that fails its integrity checks is always treated as UNSAFE.
+    judge_failure_mode: Literal["open", "closed"] = "open"
+    # How many recent judge verdicts to remember by exact text (0 turns the cache off).
+    judge_cache_size: int = 1000
 
     # RAG demo: the local embedding model (downloaded once, then cached) and how
     # many chunks to retrieve per question.

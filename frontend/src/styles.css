@@ -420,7 +420,7 @@ textarea::placeholder { color: var(--muted); opacity: 0.8; }
 .intro strong { color: var(--text); }
 
 .answer-mode { color: var(--lilac); background: var(--panel); }
-.answer-mode.mode-blocked, .answer-mode.mode-no_context { color: var(--accent-hi); background: var(--unsafe-bg); }
+.answer-mode.mode-blocked, .answer-mode.mode-no_context, .answer-mode.mode-withheld { color: var(--accent-hi); background: var(--unsafe-bg); }
 .answer { margin: 0.8rem 0 0.3rem; white-space: pre-wrap; }
 .mode-note { margin: 0 0 0.9rem; color: var(--muted); font-size: 0.8rem; }
 
