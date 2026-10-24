@@ -44,5 +44,9 @@ ENV MCP_ALLOWED_HOSTS="localhost:*,127.0.0.1:*,daniel-omari-llm-blue-team-guardr
 # Hugging Face's proxy adds the visitor's address to X-Forwarded-For; the rate limit
 # reads it from there instead of seeing every request come from the proxy.
 ENV TRUSTED_PROXY_HOPS=1
+# The demo's judge runs on a free LLM tier that can only answer so many calls a
+# minute. Above that it would drop to heuristics-only (fail-open), so the demo caps
+# total traffic at what the judge can actually answer.
+ENV RATE_LIMIT_GLOBAL_PER_MINUTE=20
 EXPOSE 7860
 CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-7860}"]
