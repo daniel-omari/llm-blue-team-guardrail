@@ -39,20 +39,9 @@ jobs:
         run: pytest -q
       - name: Security scan (Bandit, SAST)
         run: bandit -r app -q
-      # Pillow is audited separately below. Its October 2026 advisories are fixed in
-      # Pillow 13.0.0, which we can't install yet because fastembed (0.9.0) still
-      # requires pillow<13, and new ones keep being published. Pillow is pulled in by
-      # fastembed for image models; this service embeds text only and never opens an
-      # image, so none of the affected parsers or text drawing is reachable. Everything
-      # else that is installed is audited here and fails the build.
+      # Audits every installed package and fails the build on any known vulnerability.
       - name: Dependency audit (pip-audit, SCA)
-        run: |
-          pip freeze --exclude pillow --exclude-editable > /tmp/audit-requirements.txt
-          pip-audit --no-deps --disable-pip -r /tmp/audit-requirements.txt
-      # Still reported on every run, but non-blocking until fastembed allows Pillow 13.
-      - name: Pillow audit (non-blocking, waiting on fastembed)
-        continue-on-error: true
-        run: pip-audit -r requirements.txt
+        run: pip-audit
 
   frontend:
     runs-on: ubuntu-latest
