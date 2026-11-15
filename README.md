@@ -30,6 +30,22 @@ TypeScript frontend, FastAPI backend, PostgreSQL with pgvector, Docker, CI).
 
 ![Prompt Guardrail screening prompts for injection and jailbreak attempts](docs/demo.gif)
 
+**In short**
+
+- Two layers screen every prompt: fast pattern rules first, then an LLM judge for
+  whatever the rules can't settle. Every verdict says which layer decided and why.
+- The same screen guards a RAG pipeline, so instructions planted in documents are
+  quarantined before the model reads them.
+- The judge itself is hardened, because it reads attacker-written text too.
+- AI agents can call it as an MCP server.
+- Measured, not claimed: 100% precision on all three benchmarks, with the misses listed.
+
+**Jump to:** [How it works](#how-it-works) · [The interface](#the-interface) ·
+[Guarded RAG](#guarded-rag-stopping-indirect-prompt-injection) ·
+[MCP server](#mcp-server-the-guardrail-as-a-tool-for-ai-agents) ·
+[Threat model](#threat-model) · [API](#api) · [Quick start](#quick-start) ·
+[Tests](#tests) · [Benchmark](#benchmark) · [Roadmap](#roadmap)
+
 ## Background
 
 This project grew out of the guardrail component of my SCC353 Secure AI
